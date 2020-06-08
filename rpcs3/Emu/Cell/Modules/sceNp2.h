@@ -6,6 +6,8 @@
 
 #include <atomic>
 
+extern logs::channel sceNp2;
+
 // Error codes
 enum SceNpMatching2Error : u32
 {
@@ -1117,7 +1119,7 @@ struct SceNpMatching2SendRoomMessageRequest
 	SceNpMatching2CastType castType;
 	u8 padding[3];
 	SceNpMatching2RoomMessageDestination dst;
-	vm::cptr<void> msg;
+	vm::bcptr<void> msg;
 	be_t<u32> msgLen;
 	be_t<s32> option;
 };
@@ -1129,7 +1131,7 @@ struct SceNpMatching2SendRoomChatMessageRequest
 	SceNpMatching2CastType castType;
 	u8 padding[3];
 	SceNpMatching2RoomMessageDestination dst;
-	vm::cptr<void> msg;
+	vm::bcptr<void> msg;
 	be_t<u32> msgLen;
 	be_t<s32> option;
 };
@@ -1255,7 +1257,7 @@ struct SceNpMatching2SendLobbyChatMessageRequest
 	SceNpMatching2CastType castType;
 	u8 padding[3];
 	SceNpMatching2LobbyMessageDestination dst;
-	vm::cptr<void> msg;
+	vm::bcptr<void> msg;
 	be_t<u32> msgLen;
 	be_t<s32> option;
 };
@@ -1415,7 +1417,7 @@ struct SceNpMatching2RoomMessageInfo
 	u8 padding[2];
 	vm::bptr<SceNpMatching2RoomMessageDestination> dst;
 	vm::bptr<SceNpUserInfo2> srcMember;
-	vm::cptr<void> msg;
+	vm::bcptr<void> msg;
 	be_t<u32> msgLen;
 };
 
@@ -1458,7 +1460,7 @@ struct SceNpMatching2LobbyMessageInfo
 	u8 padding[2];
 	vm::bptr<SceNpMatching2LobbyMessageDestination> dst;
 	vm::bptr<SceNpUserInfo2> srcMember;
-	vm::cptr<void> msg;
+	vm::bcptr<void> msg;
 	be_t<u32> msgLen;
 };
 

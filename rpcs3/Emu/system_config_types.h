@@ -178,6 +178,7 @@ enum np_psn_status
 {
 	disabled,
 	fake,
+	rpcn,
 };
 
 enum class shader_mode

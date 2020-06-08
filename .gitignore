@@ -30,6 +30,10 @@
 *.dump
 *.wav
 
+/.cache
+/.cache2
+/.config
+/.config2
 /build
 /lib
 /tmp
@@ -37,6 +41,7 @@
 /rpcs3/Debug
 /rpcs3/Release
 /llvm_build
+/llvmlibs
 /3rdparty/llvm_build
 /Vulkan/Vulkan-build
 /Vulkan/glslang-build

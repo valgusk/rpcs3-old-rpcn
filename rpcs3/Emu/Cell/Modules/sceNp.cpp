@@ -15,11 +15,10 @@
 
 LOG_CHANNEL(sceNp);
 
-template<>
+template <>
 void fmt_class_string<SceNpError>::format(std::string& out, u64 arg)
 {
-	format_enum(out, arg, [](auto error)
-	{
+	format_enum(out, arg, [](auto error) {
 		switch (error)
 		{
 			STR_CASE(SCE_NP_ERROR_NOT_INITIALIZED);
@@ -634,6 +633,9 @@ error_code sceNpBasicRegisterHandler(vm::cptr<SceNpCommunicationId> context, vm:
 		return SCE_NP_BASIC_ERROR_INVALID_ARGUMENT;
 	}
 
+	nph->basic_handler = handler;
+	nph->basic_handler_arg = arg;
+
 	return CELL_OK;
 }
 
@@ -887,7 +889,7 @@ error_code sceNpBasicMarkMessageAsUsed(SceNpBasicMessageId msgId)
 		return SCE_NP_BASIC_ERROR_NOT_INITIALIZED;
 	}
 
-	//if (!msgId > ?)
+	//	if (!msgId > ?)
 	//{
 	//	return SCE_NP_BASIC_ERROR_INVALID_ARGUMENT;
 	//}
@@ -1099,6 +1101,7 @@ error_code sceNpBasicAddPlayersHistory(vm::cptr<SceNpId> npid, vm::ptr<char> des
 error_code sceNpBasicAddPlayersHistoryAsync(vm::cptr<SceNpId> npids, u32 count, vm::ptr<char> description, vm::ptr<u32> reqId)
 {
 	sceNp.todo("sceNpBasicAddPlayersHistoryAsync(npids=*0x%x, count=%d, description=*0x%x, reqId=*0x%x)", npids, count, description, reqId);
+	return CELL_OK;
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -1134,6 +1137,8 @@ error_code sceNpBasicAddPlayersHistoryAsync(vm::cptr<SceNpId> npids, u32 count, 
 	{
 		return SCE_NP_BASIC_ERROR_EXCEEDS_MAX;
 	}
+
+	*reqId = nph->add_players_to_history(npids, count);
 
 	return CELL_OK;
 }
@@ -1883,7 +1888,7 @@ error_code sceNpFriendlistAbortGui()
 
 error_code sceNpLookupInit()
 {
-	sceNp.todo("sceNpLookupInit()");
+	sceNp.warning("sceNpLookupInit()");
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -1925,7 +1930,7 @@ error_code sceNpLookupTerm()
 
 error_code sceNpLookupCreateTitleCtx(vm::cptr<SceNpCommunicationId> communicationId, vm::cptr<SceNpId> selfNpId)
 {
-	sceNp.todo("sceNpLookupCreateTitleCtx(communicationId=*0x%x, selfNpId=0x%x)", communicationId, selfNpId);
+	sceNp.warning("sceNpLookupCreateTitleCtx(communicationId=*0x%x, selfNpId=0x%x)", communicationId, selfNpId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -1939,12 +1944,12 @@ error_code sceNpLookupCreateTitleCtx(vm::cptr<SceNpCommunicationId> communicatio
 		return SCE_NP_COMMUNITY_ERROR_INSUFFICIENT_ARGUMENT;
 	}
 
-	return not_an_error(nph->create_lookup_context(communicationId));
+	return not_an_error(nph->create_lookup_title_context(communicationId));
 }
 
 error_code sceNpLookupDestroyTitleCtx(s32 titleCtxId)
 {
-	sceNp.todo("sceNpLookupDestroyTitleCtx(titleCtxId=%d)", titleCtxId);
+	sceNp.warning("sceNpLookupDestroyTitleCtx(titleCtxId=%d)", titleCtxId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -1953,7 +1958,7 @@ error_code sceNpLookupDestroyTitleCtx(s32 titleCtxId)
 		return SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED;
 	}
 
-	if (!nph->destroy_lookup_context(titleCtxId))
+	if (!nph->destroy_lookup_title_context(titleCtxId))
 		return SCE_NP_COMMUNITY_ERROR_INVALID_ID;
 
 	return CELL_OK;
@@ -1961,7 +1966,7 @@ error_code sceNpLookupDestroyTitleCtx(s32 titleCtxId)
 
 error_code sceNpLookupCreateTransactionCtx(s32 titleCtxId)
 {
-	sceNp.todo("sceNpLookupCreateTransactionCtx(titleCtxId=%d)", titleCtxId);
+	sceNp.warning("sceNpLookupCreateTransactionCtx(titleCtxId=%d)", titleCtxId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -1975,18 +1980,23 @@ error_code sceNpLookupCreateTransactionCtx(s32 titleCtxId)
 		return SCE_NP_COMMUNITY_ERROR_INVALID_ONLINE_ID;
 	}
 
-	return CELL_OK;
+	return not_an_error(nph->create_lookup_transaction_context(titleCtxId));
 }
 
 error_code sceNpLookupDestroyTransactionCtx(s32 transId)
 {
-	sceNp.todo("sceNpLookupDestroyTransactionCtx(transId=%d)", transId);
+	sceNp.warning("sceNpLookupDestroyTransactionCtx(transId=%d)", transId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
 	if (!nph->is_NP_Lookup_init)
 	{
 		return SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED;
+	}
+
+	if (!nph->destroy_lookup_transaction_context(transId))
+	{
+		return SCE_NP_COMMUNITY_ERROR_INVALID_ID;
 	}
 
 	return CELL_OK;
@@ -2003,7 +2013,7 @@ error_code sceNpLookupSetTimeout(s32 ctxId, usecond_t timeout)
 		return SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED;
 	}
 
-	if (timeout > 10000000) // 10 seconds
+	if (timeout < 10000000) // 10 seconds
 	{
 		return SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
 	}
@@ -2041,7 +2051,7 @@ error_code sceNpLookupWaitAsync(s32 transId, vm::ptr<s32> result)
 
 error_code sceNpLookupPollAsync(s32 transId, vm::ptr<s32> result)
 {
-	sceNp.todo("sceNpLookupPollAsync(transId=%d, result=%d)", transId, result);
+	sceNp.todo("sceNpLookupPollAsync(transId=%d, result=*0x%x)", transId, result);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
@@ -2049,6 +2059,8 @@ error_code sceNpLookupPollAsync(s32 transId, vm::ptr<s32> result)
 	{
 		return SCE_NP_COMMUNITY_ERROR_NOT_INITIALIZED;
 	}
+
+	*result = 0;
 
 	return CELL_OK;
 }
@@ -2345,7 +2357,7 @@ error_code sceNpLookupTitleSmallStorage(s32 transId, vm::ptr<void> data, u64 max
 		return SCE_NP_COMMUNITY_ERROR_INVALID_ARGUMENT;
 	}
 
-	//if (something > maxSize)
+	//	if (something > maxSize)
 	//{
 	//	return SCE_NP_COMMUNITY_ERROR_BODY_TOO_LARGE;
 	//}
@@ -2389,6 +2401,8 @@ error_code sceNpLookupTitleSmallStorageAsync(s32 transId, vm::ptr<void> data, u6
 		return SCE_NP_COMMUNITY_ERROR_INVALID_ONLINE_ID;
 	}
 
+	std::memset(data.get_ptr(), 0, maxSize);
+
 	return CELL_OK;
 }
 
@@ -2408,6 +2422,9 @@ error_code sceNpManagerRegisterCallback(vm::ptr<SceNpManagerCallback> callback, 
 		return SCE_NP_ERROR_INVALID_ARGUMENT;
 	}
 
+	nph->manager_cb = callback;
+	nph->manager_cb_arg = arg;
+
 	return CELL_OK;
 }
 
@@ -2422,6 +2439,8 @@ error_code sceNpManagerUnregisterCallback()
 		return SCE_NP_ERROR_NOT_INITIALIZED;
 	}
 
+	nph->manager_cb.set(0);
+
 	return CELL_OK;
 }
 
@@ -2433,7 +2452,7 @@ error_code sceNpManagerGetStatus(vm::ptr<s32> status)
 
 	if (!nph->is_NP_init)
 	{
-		return SCE_NP_ERROR_NOT_INITIALIZED;
+		//return SCE_NP_ERROR_NOT_INITIALIZED;
 	}
 
 	if (!status)
@@ -2454,7 +2473,7 @@ error_code sceNpManagerGetNetworkTime(vm::ptr<CellRtcTick> pTick)
 
 	if (!nph->is_NP_init)
 	{
-		return SCE_NP_ERROR_NOT_INITIALIZED;
+		//return SCE_NP_ERROR_NOT_INITIALIZED;
 	}
 
 	if (!pTick)
@@ -2481,13 +2500,13 @@ error_code sceNpManagerGetNetworkTime(vm::ptr<CellRtcTick> pTick)
 
 error_code sceNpManagerGetOnlineId(vm::ptr<SceNpOnlineId> onlineId)
 {
-	sceNp.todo("sceNpManagerGetOnlineId(onlineId=*0x%x)", onlineId);
+	sceNp.warning("sceNpManagerGetOnlineId(onlineId=*0x%x)", onlineId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
 	if (!nph->is_NP_init)
 	{
-		return SCE_NP_ERROR_NOT_INITIALIZED;
+		//return SCE_NP_ERROR_NOT_INITIALIZED;
 	}
 
 	if (!onlineId)
@@ -2512,14 +2531,14 @@ error_code sceNpManagerGetOnlineId(vm::ptr<SceNpOnlineId> onlineId)
 
 error_code sceNpManagerGetNpId(ppu_thread& ppu, vm::ptr<SceNpId> npId)
 {
-	sceNp.todo("sceNpManagerGetNpId(npId=*0x%x)", npId);
+	sceNp.warning("sceNpManagerGetNpId(npId=*0x%x)", npId);
 
 	const auto nph = g_fxo->get<named_thread<np_handler>>();
 
-	if (!nph->is_NP_init)
-	{
-		return SCE_NP_ERROR_NOT_INITIALIZED;
-	}
+	// if (!nph->is_NP_init)
+	// {
+	// 	return SCE_NP_ERROR_NOT_INITIALIZED;
+	// }
 
 	if (!npId)
 	{
@@ -4315,6 +4334,8 @@ error_code sceNpSignalingCreateCtx(vm::ptr<SceNpId> npId, vm::ptr<SceNpSignaling
 	//	return SCE_NP_SIGNALING_ERROR_CTX_MAX;
 	//}
 
+	*ctx_id = nph->create_signaling_context(npId, handler, arg);
+
 	return CELL_OK;
 }
 
@@ -4327,6 +4348,11 @@ error_code sceNpSignalingDestroyCtx(u32 ctx_id)
 	if (!nph->is_NP_init)
 	{
 		return SCE_NP_SIGNALING_ERROR_NOT_INITIALIZED;
+	}
+
+	if (!nph->destroy_signaling_context(ctx_id))
+	{
+		return SCE_NP_SIGNALING_ERROR_CTX_NOT_FOUND;
 	}
 
 	return CELL_OK;
@@ -4524,6 +4550,15 @@ error_code sceNpSignalingGetLocalNetInfo(u32 ctx_id, vm::ptr<SceNpSignalingNetIn
 		return SCE_NP_SIGNALING_ERROR_INVALID_ARGUMENT;
 	}
 
+	info->local_addr  = nph->get_local_ip_addr();
+	info->mapped_addr = nph->get_public_ip_addr();
+
+	// Pure speculation below
+	info->nat_status    = 0;
+	info->upnp_status   = 0;
+	info->npport_status = 0;
+	info->npport        = 3658;
+
 	return CELL_OK;
 }
 
@@ -4602,24 +4637,24 @@ error_code sceNpUtilCmpNpId(vm::ptr<SceNpId> id1, vm::ptr<SceNpId> id2)
 	}
 
 	// Unknown what this constant means
-	if (id1->reserved[0] != 1 || id2->reserved[0] != 1)
-	{
-		return SCE_NP_UTIL_ERROR_INVALID_NP_ID;
-	}
+	// if (id1->reserved[0] != 1 || id2->reserved[0] != 1)
+	// {
+	// 	return SCE_NP_UTIL_ERROR_INVALID_NP_ID;
+	// }
 
-	if (strncmp(id1->handle.data, id2->handle.data, 16) || id1->unk1[0] != id2->unk1[0])
+	if (strncmp(id1->handle.data, id2->handle.data, 16))// || id1->unk1[0] != id2->unk1[0])
 	{
 		return SCE_NP_UTIL_ERROR_NOT_MATCH;
 	}
 
-	if (id1->unk1[1] != id2->unk1[1])
-	{
-		// If either is zero they match
-		if (id1->opt[4] && id2->opt[4])
-		{
-			return SCE_NP_UTIL_ERROR_NOT_MATCH;
-		}
-	}
+	// if (id1->unk1[1] != id2->unk1[1])
+	// {
+	// 	// If either is zero they match
+	// 	if (id1->opt[4] && id2->opt[4])
+	// 	{
+	// 		return SCE_NP_UTIL_ERROR_NOT_MATCH;
+	// 	}
+	// }
 
 	return CELL_OK;
 }

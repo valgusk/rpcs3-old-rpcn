@@ -1,0 +1,1 @@
+IP=172.18.0.4 CACHE=/home/pew/dev/rpcs3/.cache2 CONFIG=/home/pew/dev/rpcs3/.config2 ./run.sh
