@@ -575,7 +575,7 @@ std::queue<std::vector<u8>> get_rpcn_msgs()
 }
 
 lv2_socket::lv2_socket(lv2_socket::socket_type s, s32 s_type, s32 family)
-	: socket(s), family{family}, type{s_type}
+	: socket(s), type{s_type}, family{family}
 {
 	if (socket)
 	{
