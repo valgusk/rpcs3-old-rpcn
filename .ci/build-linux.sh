@@ -13,11 +13,12 @@ cd rpcs3 || exit 1
 git submodule -q update --init $(awk '/path/ && !/llvm/ { print $3 }' .gitmodules)
 
 # Download pre-compiled llvm libs
-curl -sLO https://github.com/RPCS3/llvm-mirror/releases/download/custom-build/llvmlibs-linux.tar.gz
-mkdir llvmlibs
-tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
+# curl -sLO https://github.com/RPCS3/llvm-mirror/releases/download/custom-build/llvmlibs-linux.tar.gz
+# mkdir llvmlibs
+# tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
 
-mkdir build && cd build || exit 1
+mkdir build
+cd build || exit 1
 
 if [ "$COMPILER" = "gcc" ]; then
     # These are set in the dockerfile
@@ -36,13 +37,13 @@ else
     export RANLIB=/usr/bin/llvm-ranlib-$LLVMVER
 fi
 
-export CFLAGS="$CFLAGS -fuse-ld=${LINKER}"
+export CFLAGS="$CFLAGS -o3 -fuse-ld=${LINKER}"
 
 cmake ..                                               \
     -DCMAKE_INSTALL_PREFIX=/usr                        \
     -DBUILD_LLVM_SUBMODULE=OFF                         \
     -DLLVM_DIR=llvmlibs/lib/cmake/llvm/                \
-    -DUSE_NATIVE_INSTRUCTIONS=OFF                      \
+    -DUSE_NATIVE_INSTRUCTIONS=ON                      \
     -DUSE_PRECOMPILED_HEADERS=OFF                      \
     -DCMAKE_C_FLAGS="$CFLAGS"                          \
     -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
@@ -54,13 +55,13 @@ ninja; build_status=$?;
 
 cd ..
 
-# If it compiled succesfully let's deploy depending on the build pipeline (Travis, Azure Pipelines).
-# Travis only deploys on master, and it publishes to GitHub releases. Azure publishes PRs as artifacts
-# only.
-{   [ "$IS_AZURE" = "true" ] ||
-    { [ "$TRAVIS_BRANCH" = "master" ] && [ "$TRAVIS_PULL_REQUEST" = "false" ]; };
-} && SHOULD_DEPLOY="true" || SHOULD_DEPLOY="false"
+# # If it compiled succesfully let's deploy depending on the build pipeline (Travis, Azure Pipelines).
+# # Travis only deploys on master, and it publishes to GitHub releases. Azure publishes PRs as artifacts
+# # only.
+# {   [ "$IS_AZURE" = "true" ] ||
+#     { [ "$TRAVIS_BRANCH" = "master" ] && [ "$TRAVIS_PULL_REQUEST" = "false" ]; };
+# } && SHOULD_DEPLOY="true" || SHOULD_DEPLOY="false"
 
-if [ "$build_status" -eq 0 ] && [ "$SHOULD_DEPLOY" = "true" ]; then
+# if [ "$build_status" -eq 0 ] && [ "$SHOULD_DEPLOY" = "true" ]; then
     .ci/deploy-linux.sh
-fi
+# fi
