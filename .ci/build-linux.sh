@@ -17,6 +17,7 @@ git submodule -q update --init $(awk '/path/ && !/llvm/ { print $3 }' .gitmodule
 # mkdir llvmlibs
 # tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
 
+mv build "build$(stat -c '%w' build)" || echo "no build"
 mkdir build
 cd build || exit 1
 
@@ -37,7 +38,7 @@ else
     export RANLIB=/usr/bin/llvm-ranlib-$LLVMVER
 fi
 
-export CFLAGS="$CFLAGS -o3 -fuse-ld=${LINKER}"
+export CFLAGS="$CFLAGS -Ofast -fuse-ld=${LINKER}"
 
 cmake ..                                               \
     -DCMAKE_INSTALL_PREFIX=/usr                        \
