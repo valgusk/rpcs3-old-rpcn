@@ -34,7 +34,9 @@
 /.cache2
 /.config
 /.config2
-/build
+/build*
+/ignore-build
+/rpcs3/llvmlib*
 /lib
 /tmp
 /ipch
