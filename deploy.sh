@@ -1,3 +1,5 @@
+mv build "build$(stat -c '%w' build)" || echo "no build"
+
 DEPLOY_APPIMAGE="true" \
 BUILD_SOURCEVERSION="pew_rpcs3" \
 NAME="PEW build" \
