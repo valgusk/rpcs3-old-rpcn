@@ -30,13 +30,14 @@ if [ "$DOBUILD" = "true" ]; then
     git submodule -q update --init $(awk '/path/ { print $3 }' .gitmodules)
 
     # Download pre-compiled llvm libs
+    # rm -rf llvmlibs
     # curl -sLO https://github.com/RPCS3/llvm-mirror/releases/download/custom-build/llvmlibs-linux.tar.gz
     # mkdir llvmlibs
     # tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
 
-    mv build "build$(stat -c '%w' build)" || echo "no build"
+    # # mv build "build$(stat -c '%w' build)" || echo "no build"
     # rm -rf build
-    mkdir build
+    # mkdir build
     cd build || exit 1
 
     if [ "$COMPILER" = "gcc" ]; then
@@ -58,16 +59,16 @@ if [ "$DOBUILD" = "true" ]; then
 
     export CFLAGS="$CFLAGS -Ofast -fuse-ld=${LINKER}"
 
-    cmake ..                                               \
-        -DCMAKE_INSTALL_PREFIX=/usr                        \
-        -DUSE_NATIVE_INSTRUCTIONS=ON                      \
-        -DUSE_PRECOMPILED_HEADERS=OFF                      \
-        -DBUILD_LLVM_SUBMODULE=ON                          \
-        -DCMAKE_C_FLAGS="$CFLAGS"                          \
-        -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
-        -DCMAKE_AR="$AR"                                   \
-        -DCMAKE_RANLIB="$RANLIB"                           \
-        -G Ninja
+    # cmake ..                                               \
+    #     -DCMAKE_INSTALL_PREFIX=/usr                        \
+    #     -DUSE_NATIVE_INSTRUCTIONS=ON                      \
+    #     -DUSE_PRECOMPILED_HEADERS=OFF                      \
+    #     -DBUILD_LLVM_SUBMODULE=ON                          \
+    #     -DCMAKE_C_FLAGS="$CFLAGS"                          \
+    #     -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
+    #     -DCMAKE_AR="$AR"                                   \
+    #     -DCMAKE_RANLIB="$RANLIB"                           \
+    #     -G Ninja
 
     # -DCMAKE_PREFIX_PATH=/usr/                        
     ninja; build_status=$?;

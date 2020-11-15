@@ -47,10 +47,10 @@ np_handler::np_handler()
 		// Convert dns address
 		// TODO: recover actual user dns through OS specific API
 		in_addr conv{};
-		if (!inet_pton(AF_INET, g_cfg.net.dns.to_secret_string().c_str(), &conv))
+		if (!inet_pton(AF_INET, g_cfg.net.dns.to_string().c_str(), &conv))
 		{
 			// Do not set to disconnected on invalid IP just error and continue using default(google's 8.8.8.8)
-			nph_log.error("Provided IP(%s) address for DNS is invalid!", g_cfg.net.dns.to_secret_string());
+			nph_log.error("Provided IP(%s) address for DNS is invalid!", g_cfg.net.dns.to_string());
 		}
 		else
 		{
@@ -58,7 +58,7 @@ np_handler::np_handler()
 		}
 
 		// Init switch map for dns
-		auto swaps = fmt::split(g_cfg.net.swap_list.to_secret_string(), {"&&"});
+		auto swaps = fmt::split(g_cfg.net.swap_list.to_string(), {"&&"});
 		for (std::size_t i = 0; i < swaps.size(); i++)
 		{
 			auto host_and_ip = fmt::split(swaps[i], {"="});
@@ -183,7 +183,7 @@ void np_handler::init_NP(u32 poolsize, vm::ptr<void> poolptr)
 
 	if (g_cfg.net.psn_status >= np_psn_status::fake)
 	{
-		std::string s_npid = g_cfg.net.psn_npid.to_secret_string();
+		std::string s_npid = g_cfg.net.psn_npid.to_string();
 		ASSERT(s_npid != ""); // It should be generated in settings window if empty
 
 		std::memcpy(npid.handle.data, s_npid.c_str(), std::min(sizeof(npid.handle.data), s_npid.size()));
@@ -206,14 +206,14 @@ void np_handler::init_NP(u32 poolsize, vm::ptr<void> poolptr)
 			break;
 		
 		// Connect RPCN client
-		if (!rpcn.connect(g_cfg.net.rpcn_host.to_secret_string()))
+		if (!rpcn.connect(g_cfg.net.rpcn_host.to_string()))
 		{
 			rpcn_log.error("Connection to RPCN Failed!");
 			is_psn_active = false;
 			return;
 		}
 
-		if (!rpcn.login(g_cfg.net.psn_npid, g_cfg.net.rpcn_password.to_secret_string()))
+		if (!rpcn.login(g_cfg.net.psn_npid, g_cfg.net.rpcn_password.to_string()))
 		{
 			rpcn_log.error("RPCN login attempt failed!");
 			is_psn_active = false;

@@ -203,6 +203,11 @@ namespace cfg
 			return m_value;
 		}
 
+		void set(T value)
+		{
+			m_value = value;
+		}
+
 		void from_default() override
 		{
 			m_value = def;
@@ -437,25 +442,6 @@ namespace cfg
 		{
 			m_value = m_value.make(value);
 			return true;
-		}
-	};
-
-	class secret_string final : public string
-	{
-	public:
-		secret_string(node* owner, std::string name, std::string def = {}, bool dynamic = false)
-			: string(owner, name, def, dynamic)
-		{
-		}
-
-		std::string to_string() const override
-		{
-			return std::string("Himitsu!");
-		}
-
-		std::string to_secret_string() const
-		{
-			return string::to_string();
 		}
 	};
 

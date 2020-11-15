@@ -12,6 +12,7 @@
 #include "gui_settings.h"
 #include "game_list.h"
 #include "game_list_grid.h"
+#include "patch_manager_dialog.h"
 
 #include "Emu/Memory/vm.h"
 #include "Emu/System.h"
@@ -555,28 +556,33 @@ void game_list_frame::Refresh(const bool from_drive, const bool scroll_after)
 
 				GameInfo game;
 				game.path         = dir;
-				game.icon_path    = sfo_dir + "/ICON0.PNG";
-				game.serial       = psf::get_string(psf, "TITLE_ID", "");
-				game.name         = psf::get_string(psf, "TITLE", cat_unknown_localized);
-				game.app_ver      = psf::get_string(psf, "APP_VER", cat_unknown_localized);
-				game.version      = psf::get_string(psf, "VERSION", cat_unknown_localized);
-				game.category     = psf::get_string(psf, "CATEGORY", cat_unknown);
-				game.fw           = psf::get_string(psf, "PS3_SYSTEM_VER", cat_unknown_localized);
+				game.serial       = std::string(psf::get_string(psf, "TITLE_ID", ""));
+				game.name         = std::string(psf::get_string(psf, "TITLE", cat_unknown_localized));
+				game.app_ver      = std::string(psf::get_string(psf, "APP_VER", cat_unknown_localized));
+				game.version      = std::string(psf::get_string(psf, "VERSION", cat_unknown_localized));
+				game.category     = std::string(psf::get_string(psf, "CATEGORY", cat_unknown));
+				game.fw           = std::string(psf::get_string(psf, "PS3_SYSTEM_VER", cat_unknown_localized));
 				game.parental_lvl = psf::get_integer(psf, "PARENTAL_LEVEL", 0);
 				game.resolution   = psf::get_integer(psf, "RESOLUTION", 0);
 				game.sound_format = psf::get_integer(psf, "SOUND_FORMAT", 0);
 				game.bootable     = psf::get_integer(psf, "BOOTABLE", 0);
 				game.attr         = psf::get_integer(psf, "ATTRIBUTE", 0);
+				game.icon_path    = fs::get_config_dir() + "/Icons/game_icons/" + game.serial + "/ICON0.PNG";
+
+				if (!fs::is_file(game.icon_path))
+				{
+					game.icon_path = sfo_dir + "/ICON0.PNG";
+				}
 
 				mutex_cat.lock();
 
 				const QString serial = qstr(game.serial);
-				const QString note = m_gui_settings->GetValue(gui::notes, serial, "").toString();
-				const QString title = m_gui_settings->GetValue(gui::titles, serial, "").toString().simplified();
 
 				// Read persistent_settings values
+				QString note        = m_persistent_settings->GetValue(gui::persistent::notes, serial, "").toString();
+				QString title       = m_persistent_settings->GetValue(gui::persistent::titles, serial, "").toString().simplified();
 				QString last_played = m_persistent_settings->GetValue(gui::persistent::last_played, serial, "").toString();
-				int playtime        = m_persistent_settings->GetValue(gui::persistent::playtime, serial, 0).toInt();
+				quint64 playtime    = m_persistent_settings->GetValue(gui::persistent::playtime, serial, 0).toULongLong();
 
 				// Read deprecated gui_setting values first for backwards compatibility (older than January 12th 2020).
 				// Restrict this to empty persistent settings to keep continuity.
@@ -586,7 +592,28 @@ void game_list_frame::Refresh(const bool from_drive, const bool scroll_after)
 				}
 				if (playtime <= 0)
 				{
-					playtime = m_gui_settings->GetValue(gui::persistent::playtime, serial, 0).toInt();
+					playtime = m_gui_settings->GetValue(gui::persistent::playtime, serial, 0).toULongLong();
+				}
+				// Deprecated values older than August 2nd 2020
+				if (note.isEmpty())
+				{
+					note = m_gui_settings->GetValue(gui::persistent::notes, serial, "").toString();
+
+					// Move to persistent settings
+					if (!note.isEmpty())
+					{
+						m_persistent_settings->SetValue(gui::persistent::notes, serial, note);
+					}
+				}
+				if (title.isEmpty())
+				{
+					title = m_gui_settings->GetValue(gui::persistent::titles, serial, "").toString().simplified();
+
+					// Move to persistent settings
+					if (!title.isEmpty())
+					{
+						m_persistent_settings->SetValue(gui::persistent::titles, serial, title);
+					}
 				}
 
 				// Set persistent_settings values if values exist
@@ -870,7 +897,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			? tr("&Reboot with custom configuration")
 			: tr("&Boot with custom configuration"));
 		boot_custom->setFont(font);
-		connect(boot_custom, &QAction::triggered, [=, this]
+		connect(boot_custom, &QAction::triggered, [this, gameinfo]
 		{
 			sys_log.notice("Booting from gamelist per context menu...");
 			Q_EMIT RequestBoot(gameinfo);
@@ -890,6 +917,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	QAction* pad_configure = menu.addAction(gameinfo->hasCustomPadConfig
 		? tr("&Change Custom Gamepad Configuration")
 		: tr("&Create Custom Gamepad Configuration"));
+	QAction* configure_patches = menu.addAction(tr("&Configure Game Patches"));
 	QAction* create_ppu_cache = menu.addAction(tr("&Create PPU Cache"));
 	menu.addSeparator();
 	QAction* rename_title = menu.addAction(tr("&Rename In Game List"));
@@ -902,7 +930,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	if (gameinfo->hasCustomConfig)
 	{
 		QAction* remove_custom_config = remove_menu->addAction(tr("&Remove Custom Configuration"));
-		connect(remove_custom_config, &QAction::triggered, [=, this]()
+		connect(remove_custom_config, &QAction::triggered, [this, current_game, gameinfo]()
 		{
 			if (RemoveCustomConfiguration(current_game.serial, gameinfo, true))
 			{
@@ -913,7 +941,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	if (gameinfo->hasCustomPadConfig)
 	{
 		QAction* remove_custom_pad_config = remove_menu->addAction(tr("&Remove Custom Gamepad Configuration"));
-		connect(remove_custom_pad_config, &QAction::triggered, [=, this]()
+		connect(remove_custom_pad_config, &QAction::triggered, [this, current_game, gameinfo]()
 		{
 			if (RemoveCustomPadConfiguration(current_game.serial, gameinfo, true))
 			{
@@ -925,22 +953,22 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	{
 		remove_menu->addSeparator();
 		QAction* remove_shaders_cache = remove_menu->addAction(tr("&Remove Shaders Cache"));
-		connect(remove_shaders_cache, &QAction::triggered, [=, this]()
+		connect(remove_shaders_cache, &QAction::triggered, [this, cache_base_dir]()
 		{
 			RemoveShadersCache(cache_base_dir, true);
 		});
 		QAction* remove_ppu_cache = remove_menu->addAction(tr("&Remove PPU Cache"));
-		connect(remove_ppu_cache, &QAction::triggered, [=, this]()
+		connect(remove_ppu_cache, &QAction::triggered, [this, cache_base_dir]()
 		{
 			RemovePPUCache(cache_base_dir, true);
 		});
 		QAction* remove_spu_cache = remove_menu->addAction(tr("&Remove SPU Cache"));
-		connect(remove_spu_cache, &QAction::triggered, [=, this]()
+		connect(remove_spu_cache, &QAction::triggered, [this, cache_base_dir]()
 		{
 			RemoveSPUCache(cache_base_dir, true);
 		});
 		QAction* remove_all_caches = remove_menu->addAction(tr("&Remove All Caches"));
-		connect(remove_all_caches, &QAction::triggered, [=, this]()
+		connect(remove_all_caches, &QAction::triggered, [this, cache_base_dir]()
 		{
 			if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove all caches?")) != QMessageBox::Yes)
 				return;
@@ -955,7 +983,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	if (gameinfo->hasCustomConfig)
 	{
 		QAction* open_config_dir = menu.addAction(tr("&Open Custom Config Folder"));
-		connect(open_config_dir, &QAction::triggered, [=, this]()
+		connect(open_config_dir, &QAction::triggered, [current_game]()
 		{
 			const std::string new_config_path = Emulator::GetCustomConfigPath(current_game.serial);
 
@@ -971,7 +999,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	if (fs::is_dir(data_base_dir))
 	{
 		QAction* open_data_dir = menu.addAction(tr("&Open Data Folder"));
-		connect(open_data_dir, &QAction::triggered, [=, this]()
+		connect(open_data_dir, &QAction::triggered, [data_base_dir]()
 		{
 			gui::utils::open_dir(data_base_dir);
 		});
@@ -986,12 +1014,12 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	QAction* copy_name = info_menu->addAction(tr("&Copy Name"));
 	QAction* copy_serial = info_menu->addAction(tr("&Copy Serial"));
 
-	connect(boot, &QAction::triggered, [=, this]()
+	connect(boot, &QAction::triggered, [this, gameinfo]()
 	{
 		sys_log.notice("Booting from gamelist per context menu...");
 		Q_EMIT RequestBoot(gameinfo, gameinfo->hasCustomConfig);
 	});
-	connect(configure, &QAction::triggered, [=, this]()
+	connect(configure, &QAction::triggered, [this, current_game, gameinfo]()
 	{
 		settings_dialog dlg(m_gui_settings, m_emu_settings, 0, this, &current_game);
 		connect(&dlg, &settings_dialog::EmuSettingsApplied, [this, gameinfo]()
@@ -1005,7 +1033,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		});
 		dlg.exec();
 	});
-	connect(pad_configure, &QAction::triggered, [=, this]()
+	connect(pad_configure, &QAction::triggered, [this, current_game, gameinfo]()
 	{
 		pad_settings_dialog dlg(m_gui_settings, this, &current_game);
 
@@ -1032,7 +1060,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			CreatePPUCache(gameinfo);
 		}
 	});
-	connect(remove_game, &QAction::triggered, [=, this]
+	connect(remove_game, &QAction::triggered, [this, current_game, gameinfo, cache_base_dir, name]
 	{
 		if (current_game.path.empty())
 		{
@@ -1069,22 +1097,35 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			}
 		}
 	});
-	connect(open_game_folder, &QAction::triggered, [=, this]()
+	connect(configure_patches, &QAction::triggered, [this, current_game, gameinfo]()
+	{
+		std::unordered_map<std::string, std::set<std::string>> games;
+		for (const auto& game : m_game_data)
+		{
+			if (game)
+			{
+				games[game->info.serial].insert(game_list_frame::GetGameVersion(game));
+			}
+		}
+		patch_manager_dialog patch_manager(m_gui_settings, games, current_game.serial, this);
+		patch_manager.exec();
+	});
+	connect(open_game_folder, &QAction::triggered, [current_game]()
 	{
 		gui::utils::open_dir(current_game.path);
 	});
-	connect(check_compat, &QAction::triggered, [=, this]
+	connect(check_compat, &QAction::triggered, [serial]
 	{
 		const QString link = "https://rpcs3.net/compatibility?g=" + serial;
 		QDesktopServices::openUrl(QUrl(link));
 	});
-	connect(download_compat, &QAction::triggered, [=, this]
+	connect(download_compat, &QAction::triggered, [this]
 	{
 		m_game_compat->RequestCompatibility(true);
 	});
-	connect(rename_title, &QAction::triggered, [=, this]
+	connect(rename_title, &QAction::triggered, [this, name, serial, global_pos]
 	{
-		const QString custom_title = m_gui_settings->GetValue(gui::titles, serial, "").toString();
+		const QString custom_title = m_persistent_settings->GetValue(gui::persistent::titles, serial, "").toString();
 		const QString old_title = custom_title.isEmpty() ? name : custom_title;
 		QString new_title;
 
@@ -1100,20 +1141,20 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			if (new_title.isEmpty() || new_title == name)
 			{
 				m_titles.remove(serial);
-				m_gui_settings->RemoveValue(gui::titles, serial);
+				m_persistent_settings->RemoveValue(gui::persistent::titles, serial);
 			}
 			else
 			{
 				m_titles.insert(serial, new_title);
-				m_gui_settings->SetValue(gui::titles, serial, new_title);
+				m_persistent_settings->SetValue(gui::persistent::titles, serial, new_title);
 			}
 			Refresh(true); // full refresh in order to reliably sort the list
 		}
 	});
-	connect(edit_notes, &QAction::triggered, [=, this]
+	connect(edit_notes, &QAction::triggered, [this, name, serial]
 	{
 		bool accepted;
-		const QString old_notes = m_gui_settings->GetValue(gui::notes, serial, "").toString();
+		const QString old_notes = m_persistent_settings->GetValue(gui::persistent::notes, serial, "").toString();
 		const QString new_notes = QInputDialog::getMultiLineText(this, tr("Edit Tooltip Notes"), tr("%0\n%1").arg(name).arg(serial), old_notes, &accepted);
 
 		if (accepted)
@@ -1121,25 +1162,25 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 			if (new_notes.simplified().isEmpty())
 			{
 				m_notes.remove(serial);
-				m_gui_settings->RemoveValue(gui::notes, serial);
+				m_persistent_settings->RemoveValue(gui::persistent::notes, serial);
 			}
 			else
 			{
 				m_notes.insert(serial, new_notes);
-				m_gui_settings->SetValue(gui::notes, serial, new_notes);
+				m_persistent_settings->SetValue(gui::persistent::notes, serial, new_notes);
 			}
 			Refresh();
 		}
 	});
-	connect(copy_info, &QAction::triggered, [=, this]
+	connect(copy_info, &QAction::triggered, [name, serial]
 	{
 		QApplication::clipboard()->setText(name % QStringLiteral(" [") % serial % QStringLiteral("]"));
 	});
-	connect(copy_name, &QAction::triggered, [=, this]
+	connect(copy_name, &QAction::triggered, [name]
 	{
 		QApplication::clipboard()->setText(name);
 	});
-	connect(copy_serial, &QAction::triggered, [=, this]
+	connect(copy_serial, &QAction::triggered, [serial]
 	{
 		QApplication::clipboard()->setText(serial);
 	});
@@ -1417,7 +1458,7 @@ void game_list_frame::BatchCreatePPUCaches()
 		}
 	}
 
-	pdlg->setLabelText(tr("Created PPU Caches for %0 titles").arg(created));
+	pdlg->setLabelText(tr("Created PPU Caches for %n title(s)", "", created));
 	pdlg->setCancelButtonText(tr("OK"));
 	QApplication::beep();
 }
@@ -1879,7 +1920,7 @@ void game_list_frame::PopulateGameList()
 {
 	int selected_row = -1;
 
-	std::string selected_item = CurrentSelectionIconPath();
+	std::string selected_item = CurrentSelectionPath();
 
 	m_game_list->clearSelection();
 	m_game_list->clearContents();
@@ -1959,7 +2000,7 @@ void game_list_frame::PopulateGameList()
 		}
 
 		// Playtimes
-		const qint64 elapsed_ms = m_persistent_settings->GetPlaytime(serial);
+		const quint64 elapsed_ms = m_persistent_settings->GetPlaytime(serial);
 
 		// Last played (support outdated values)
 		QDate last_played;
@@ -1987,10 +2028,10 @@ void game_list_frame::PopulateGameList()
 		m_game_list->setItem(row, gui::column_sound,      new custom_table_widget_item(GetStringFromU32(game->info.sound_format, localized.sound.format, true)));
 		m_game_list->setItem(row, gui::column_parental,   new custom_table_widget_item(GetStringFromU32(game->info.parental_lvl, localized.parental.level), Qt::UserRole, game->info.parental_lvl));
 		m_game_list->setItem(row, gui::column_last_play,  new custom_table_widget_item(locale.toString(last_played, gui::persistent::last_played_date_format_new), Qt::UserRole, last_played));
-		m_game_list->setItem(row, gui::column_playtime,   new custom_table_widget_item(localized.GetVerboseTimeByMs(elapsed_ms), Qt::UserRole, elapsed_ms));
+		m_game_list->setItem(row, gui::column_playtime,   new custom_table_widget_item(elapsed_ms == 0 ? tr("Never played") : localized.GetVerboseTimeByMs(elapsed_ms), Qt::UserRole, elapsed_ms));
 		m_game_list->setItem(row, gui::column_compat,     compat_item);
 
-		if (selected_item == game->info.icon_path)
+		if (selected_item == game->info.path + game->info.icon_path)
 		{
 			selected_row = row;
 		}
@@ -2007,7 +2048,7 @@ void game_list_frame::PopulateGameGrid(int maxCols, const QSize& image_size, con
 	int r = 0;
 	int c = 0;
 
-	const std::string selected_item = CurrentSelectionIconPath();
+	const std::string selected_item = CurrentSelectionPath();
 
 	m_game_grid->deleteLater();
 
@@ -2066,7 +2107,7 @@ void game_list_frame::PopulateGameGrid(int maxCols, const QSize& image_size, con
 			m_game_grid->item(r, c)->setToolTip(tr("%0 [%1]").arg(title).arg(serial));
 		}
 
-		if (selected_item == app->info.icon_path)
+		if (selected_item == app->info.path + app->info.icon_path)
 		{
 			m_game_grid->setCurrentCell(r, c);
 		}
@@ -2107,7 +2148,7 @@ bool game_list_frame::SearchMatchesApp(const QString& name, const QString& seria
 	return true;
 }
 
-std::string game_list_frame::CurrentSelectionIconPath()
+std::string game_list_frame::CurrentSelectionPath()
 {
 	std::string selection;
 
@@ -2137,7 +2178,7 @@ std::string game_list_frame::CurrentSelectionIconPath()
 			auto game = var.value<game_info>();
 			if (game)
 			{
-				selection = game->info.icon_path;
+				selection = game->info.path + game->info.icon_path;
 			}
 		}
 	}

@@ -242,7 +242,7 @@ error_code sys_spu_image_open(ppu_thread& ppu, vm::ptr<sys_spu_image> img, vm::c
 
 	sys_spu.warning("sys_spu_image_open(img=*0x%x, path=%s)", img, path);
 
-	auto [fs_error, ppath, file] = lv2_file::open(path.get_ptr(), 0, 0);
+	auto [fs_error, ppath, path0, file, type] = lv2_file::open(path.get_ptr(), 0, 0);
 
 	if (fs_error)
 	{
@@ -756,7 +756,7 @@ error_code sys_spu_thread_group_start(ppu_thread& ppu, u32 id)
 		if (thread && ran_threads--)
 		{
 			thread->state -= cpu_flag::stop;
-			thread_ctrl::raw_notify(*thread);
+			thread_ctrl::notify(*thread);
 		}
 	}
 
@@ -821,7 +821,7 @@ error_code sys_spu_thread_group_suspend(ppu_thread& ppu, u32 id)
 			return false;
 		}
 
-		error = CellError{CELL_CANCEL};
+		error = CellError{CELL_CANCEL + 0u};
 		return true;
 	});
 
@@ -892,7 +892,7 @@ error_code sys_spu_thread_group_resume(ppu_thread& ppu, u32 id)
 			return false;
 		}
 
-		error = CellError{CELL_CANCEL};
+		error = CellError{CELL_CANCEL + 0u};
 		return true;
 	});
 
@@ -906,7 +906,7 @@ error_code sys_spu_thread_group_resume(ppu_thread& ppu, u32 id)
 		if (thread)
 		{
 			thread->state -= cpu_flag::suspend;
-			thread_ctrl::raw_notify(*thread);
+			thread_ctrl::notify(*thread);
 		}
 	}
 
@@ -1005,15 +1005,27 @@ error_code sys_spu_thread_group_terminate(ppu_thread& ppu, u32 id, s32 value)
 	{
 		if (thread)
 		{
-			thread->state += cpu_flag::stop + cpu_flag::ret;
+			thread->state.fetch_op([](bs_t<cpu_flag>& flags)
+			{
+				if (flags & cpu_flag::stop)
+				{
+					// In case the thread raised the ret flag itself at some point do not raise it again
+					return false;
+				}
+
+				flags += cpu_flag::stop + cpu_flag::ret;
+				return true;
+			});
 		}
 	}
 
 	for (auto& thread : group->threads)
 	{
-		if (thread && group->running)
+		while (thread && group->running && thread->state & cpu_flag::wait)
 		{
-			thread_ctrl::raw_notify(*thread);
+			// TODO: replace with proper solution
+			if (atomic_wait_engine::raw_notify(nullptr, thread_ctrl::get_native_id(*thread)))
+				break;
 		}
 	}
 
@@ -1905,7 +1917,7 @@ error_code sys_isolated_spu_create(ppu_thread& ppu, vm::ptr<u32> id, vm::ptr<voi
 	return CELL_OK;
 }
 
-template <bool isolated = false> 
+template <bool isolated = false>
 error_code raw_spu_destroy(ppu_thread& ppu, u32 id)
 {
 	const u32 idm_id = spu_thread::find_raw_spu(id);

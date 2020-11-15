@@ -42,6 +42,7 @@ namespace rsx
 	//Base for resources with reference counting
 	class ref_counted
 	{
+	protected:
 		atomic_t<s32> ref_count{ 0 }; // References held
 		atomic_t<u8> idle_time{ 0 };  // Number of times the resource has been tagged idle
 
@@ -114,8 +115,7 @@ namespace rsx
 		u32 pitch = 0;
 
 		rsx::surface_color_format color_format;
-		rsx::surface_depth_format depth_format;
-		bool depth_buffer_float;
+		rsx::surface_depth_format2 depth_format;
 
 		u16 width = 0;
 		u16 height = 0;
@@ -245,18 +245,17 @@ namespace rsx
 		}
 	}
 
-	//
-	static inline u32 floor_log2(u32 value)
+	static constexpr u32 floor_log2(u32 value)
 	{
 		return value <= 1 ? 0 : std::countl_zero(value) ^ 31;
 	}
 
-	static inline u32 ceil_log2(u32 value)
+	static constexpr u32 ceil_log2(u32 value)
 	{
-		return value <= 1 ? 0 : std::countl_zero((value - 1) << 1) ^ 31;
+		return floor_log2(value) + u32{!!(value & (value - 1))};
 	}
 
-	static inline u32 next_pow2(u32 x)
+	static constexpr u32 next_pow2(u32 x)
 	{
 		if (x <= 2) return x;
 
@@ -448,17 +447,11 @@ namespace rsx
 		}
 	}
 
-	void scale_image_nearest(void* dst, const void* src, u16 src_width, u16 src_height, u16 dst_pitch, u16 src_pitch, u8 element_size, u8 samples_u, u8 samples_v, bool swap_bytes = false);
-
 	void convert_scale_image(u8 *dst, AVPixelFormat dst_format, int dst_width, int dst_height, int dst_pitch,
 		const u8 *src, AVPixelFormat src_format, int src_width, int src_height, int src_pitch, int src_slice_h, bool bilinear);
 
 	void clip_image(u8 *dst, const u8 *src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch);
 	void clip_image_may_overlap(u8 *dst, const u8 *src, int clip_x, int clip_y, int clip_w, int clip_h, int bpp, int src_pitch, int dst_pitch, u8* buffer);
-
-	void convert_le_f32_to_be_d24(void *dst, void *src, u32 row_length_in_texels, u32 num_rows);
-	void convert_le_d24x8_to_be_d24x8(void *dst, void *src, u32 row_length_in_texels, u32 num_rows);
-	void convert_le_d24x8_to_le_f32(void *dst, void *src, u32 row_length_in_texels, u32 num_rows);
 
 	std::array<float, 4> get_constant_blend_colors();
 
@@ -585,7 +578,7 @@ namespace rsx
 
 	static inline const f32 get_resolution_scale()
 	{
-		return g_cfg.video.strict_rendering_mode? 1.f : (g_cfg.video.resolution_scale_percent / 100.f);
+		return g_cfg.video.strict_rendering_mode ? 1.f : (g_cfg.video.resolution_scale_percent / 100.f);
 	}
 
 	static inline const int get_resolution_scale_percent()

@@ -12,6 +12,7 @@ namespace Ui
 	class patch_manager_dialog;
 }
 
+class downloader;
 class gui_settings;
 
 class patch_manager_dialog : public QDialog
@@ -30,23 +31,23 @@ class patch_manager_dialog : public QDialog
 		QString patch_version;
 	};
 
-	const QString tr_all_titles   = tr("All titles - Warning: These patches will apply globally to all games. Use with caution!");
+	const QString tr_all_titles   = tr("All titles - Warning: These patches apply to all games!");
 	const QString tr_all_serials  = tr("All serials");
 	const QString tr_all_versions = tr("All versions");
 
 public:
-	explicit patch_manager_dialog(std::shared_ptr<gui_settings> gui_settings, std::unordered_map<std::string, std::set<std::string>> games, QWidget* parent = nullptr);
+	explicit patch_manager_dialog(std::shared_ptr<gui_settings> gui_settings, std::unordered_map<std::string, std::set<std::string>> games, const std::string& search_term, QWidget* parent = nullptr);
 	~patch_manager_dialog();
 
 	int exec() override;
 
 private Q_SLOTS:
 	void filter_patches(const QString& term);
-	void on_item_selected(QTreeWidgetItem *current, QTreeWidgetItem *previous);
-	void on_item_changed(QTreeWidgetItem *item, int column);
-	void on_custom_context_menu_requested(const QPoint& pos);
-	void on_legacy_patches_enabled(int state);
-	void on_show_owned_games_only(int state);
+	void handle_item_selected(QTreeWidgetItem *current, QTreeWidgetItem *previous);
+	void handle_item_changed(QTreeWidgetItem *item, int column);
+	void handle_custom_context_menu_requested(const QPoint& pos);
+	void handle_legacy_patches_enabled(int state);
+	void handle_show_owned_games_only(int state);
 
 private:
 	void refresh(bool restore_layout = false);
@@ -55,6 +56,8 @@ private:
 	void save_config();
 	void update_patch_info(const gui_patch_info& info);
 	bool is_valid_file(const QMimeData& md, QStringList* drop_paths = nullptr);
+	void download_update();
+	bool handle_json(const QByteArray& data);
 
 	std::shared_ptr<gui_settings> m_gui_settings;
 
@@ -63,6 +66,8 @@ private:
 
 	patch_engine::patch_map m_map;
 	bool m_legacy_patches_enabled = false;
+
+	downloader* m_downloader = nullptr;
 
 	Ui::patch_manager_dialog *ui;
 

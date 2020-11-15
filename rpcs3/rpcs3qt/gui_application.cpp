@@ -9,6 +9,7 @@
 #include "gs_frame.h"
 #include "gl_gs_frame.h"
 #include "display_sleep_control.h"
+#include "localized_emu.h"
 
 #ifdef WITH_DISCORD_RPC
 #include "_discord_utils.h"
@@ -28,6 +29,13 @@
 #include <QDirIterator>
 
 #include <clocale>
+
+#include "Emu/RSX/Null/NullGSRender.h"
+#include "Emu/RSX/GL/GLGSRender.h"
+
+#if defined(_WIN32) || defined(HAVE_VULKAN)
+#include "Emu/RSX/VK/VKGSRender.h"
+#endif
 
 LOG_CHANNEL(gui_log, "GUI");
 
@@ -50,8 +58,14 @@ void gui_application::Init()
 	m_gui_settings.reset(new gui_settings());
 	m_persistent_settings.reset(new persistent_settings());
 
+	// Get deprecated active user (before August 2nd 2020)
+	QString active_user = m_gui_settings->GetValue(gui::um_active_user).toString();
+
+	// Get active user with deprecated active user as fallback
+	active_user = m_persistent_settings->GetCurrentUser(active_user.isEmpty() ? "00000001" : active_user);
+
 	// Force init the emulator
-	InitializeEmulator(m_gui_settings->GetCurrentUser().toStdString(), true, m_show_gui);
+	InitializeEmulator(active_user.toStdString(), true, m_show_gui);
 
 	// Create the main window
 	if (m_show_gui)
@@ -290,6 +304,34 @@ void gui_application::InitializeCallbacks()
 		RequestCallAfter(std::move(func));
 	};
 
+	callbacks.init_gs_render = []()
+	{
+		switch (video_renderer type = g_cfg.video.renderer)
+		{
+		case video_renderer::null:
+		{
+			g_fxo->init<rsx::thread, named_thread<NullGSRender>>();
+			break;
+		}
+		case video_renderer::opengl:
+		{
+			g_fxo->init<rsx::thread, named_thread<GLGSRender>>();
+			break;
+		}
+#if defined(_WIN32) || defined(HAVE_VULKAN)
+		case video_renderer::vulkan:
+		{
+			g_fxo->init<rsx::thread, named_thread<VKGSRender>>();
+			break;
+		}
+#endif
+		default:
+		{
+			fmt::throw_exception("Invalid video renderer: %s" HERE, type);
+		}
+		}
+	};
+
 	callbacks.get_gs_frame    = [this]() -> std::unique_ptr<GSFrameBase> { return get_gs_frame(); };
 	callbacks.get_msg_dialog  = [this]() -> std::shared_ptr<MsgDialogBase> { return m_show_gui ? std::make_shared<msg_dialog_frame>() : nullptr; };
 	callbacks.get_osk_dialog  = [this]() -> std::shared_ptr<OskDialogBase> { return m_show_gui ? std::make_shared<osk_dialog_frame>() : nullptr; };
@@ -314,6 +356,16 @@ void gui_application::InitializeCallbacks()
 			default: gui_log.fatal("Unknown type in handle_taskbar_progress(type=%d, value=%d)", type, value); break;
 			}
 		}
+	};
+
+	callbacks.get_localized_string = [](localized_string_id id, const char* args) -> std::string
+	{
+		return localized_emu::get_string(id, args);
+	};
+
+	callbacks.get_localized_u32string = [](localized_string_id id, const char* args) -> std::u32string
+	{
+		return localized_emu::get_u32string(id, args);
 	};
 
 	Emu.SetCallbacks(std::move(callbacks));
@@ -353,8 +405,7 @@ void gui_application::UpdatePlaytime()
 		return;
 	}
 
-	const qint64 playtime = m_persistent_settings->GetPlaytime(serial) + m_timer_playtime.restart();
-	m_persistent_settings->SetPlaytime(serial, playtime);
+	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart());
 	m_persistent_settings->SetLastPlayed(serial, QDate::currentDate().toString(gui::persistent::last_played_date_format));
 }
 
@@ -372,8 +423,7 @@ void gui_application::StopPlaytime()
 		return;
 	}
 
-	const qint64 playtime = m_persistent_settings->GetPlaytime(serial) + m_timer_playtime.elapsed();
-	m_persistent_settings->SetPlaytime(serial, playtime);
+	m_persistent_settings->AddPlaytime(serial, m_timer_playtime.restart());
 	m_persistent_settings->SetLastPlayed(serial, QDate::currentDate().toString(gui::persistent::last_played_date_format));
 	m_timer_playtime.invalidate();
 }

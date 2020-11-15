@@ -24,7 +24,7 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, c
 	setMinimumSize(300, sizeHint().height());
 
 	const auto cpu = _cpu.get();
-	m_cpu_offset = cpu->id_type() != 1 ? static_cast<spu_thread&>(*cpu).ls : vm::g_sudo_addr;
+	m_cpu_offset = cpu->id_type() == 2 ? static_cast<spu_thread&>(*cpu).ls : vm::g_sudo_addr;
 	QString instruction = qstr(fmt::format("%08x", *reinterpret_cast<be_t<u32>*>(m_cpu_offset + m_pc)));
 
 	QVBoxLayout* vbox_panel(new QVBoxLayout());
@@ -33,7 +33,7 @@ instruction_editor_dialog::instruction_editor_dialog(QWidget *parent, u32 _pc, c
 	QVBoxLayout* vbox_right_panel(new QVBoxLayout());
 	QHBoxLayout* hbox_b_panel(new QHBoxLayout());
 
-	QPushButton* button_ok(new QPushButton(tr("Ok")));
+	QPushButton* button_ok(new QPushButton(tr("OK")));
 	QPushButton* button_cancel(new QPushButton(tr("Cancel")));
 	button_ok->setFixedWidth(80);
 	button_cancel->setFixedWidth(80);

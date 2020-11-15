@@ -9,6 +9,8 @@
 
 #include "../Overlays/overlays.h"
 
+#include "Utilities/hash.h"
+
 #define VK_OVERLAY_MAX_DRAW_CALLS 1024
 
 namespace vk
@@ -1027,8 +1029,7 @@ namespace vk
 			// Coverage sampling disabled, but actually report correct number of samples
 			renderpass_config.set_multisample_state(target->samples(), 0xFFFF, false, false, false);
 
-			overlay_pass::run(cmd, { 0, 0, target->width(), target->height() }, target,
-				target->get_view(0xAAE4, rsx::default_remap_vector), render_pass);
+			overlay_pass::run(cmd, { 0, 0, target->width(), target->height() }, target, std::vector<vk::image_view*>{}, render_pass);
 		}
 	};
 
@@ -1064,8 +1065,7 @@ namespace vk
 				"}\n";
 
 			fs_src =
-				"#version 420\n"
-				"\n"
+				"#version 420\n\n"
 				"layout(set=0, binding=1) uniform sampler2D fs0;\n"
 				"layout(set=0, binding=2) uniform sampler2D fs1;\n"
 				"layout(location=0) in vec2 tc0;\n"
@@ -1073,47 +1073,41 @@ namespace vk
 				"\n"
 				"layout(push_constant) uniform static_data\n"
 				"{\n"
-				" float gamma;\n"
-				" int limit_range;\n"
-				" int stereo;\n"
-				" int stereo_image_count;\n"
+				"	float gamma;\n"
+				"	int limit_range;\n"
+				"	int stereo;\n"
+				"	int stereo_image_count;\n"
 				"};\n"
 				"\n"
 				"vec4 read_source()\n"
 				"{\n"
-				" if (stereo == 0) return texture(fs0, tc0);\n"
+				"	if (stereo == 0) return texture(fs0, tc0);\n"
 				"\n"
-				" vec2 tc0stretch = tc0 * vec2(1.f, 2.f);\n"
+				"	vec4 left, right;\n"
+				"	if (stereo_image_count == 2)\n"
+				"	{\n"
+				"		left = texture(fs0, tc0);\n"
+				"		right = texture(fs1, tc0);\n"
+				"	}\n"
+				"	else\n"
+				"	{\n"
+				"		vec2 coord_left = tc0 * vec2(1.f, 0.4898f);\n"
+				"		vec2 coord_right = coord_left + vec2(0.f, 0.510204f);\n"
+				"		left = texture(fs0, coord_left);\n"
+				"		right = texture(fs0, coord_right);\n"
+				"	}\n"
 				"\n"
-				" if(tc0.y > 0.5f) {\n"
-				"   tc0stretch -= vec2(0.f, 1.f);\n"
-				" }\n"
-				"\n"
-				" vec4 left, right;\n"
-				" if (stereo_image_count == 2)\n"
-				" {\n"
-				"   left = texture(fs0, tc0stretch);\n"
-				"   right = texture(fs1, tc0stretch);\n"
-				" }\n"
-				" else\n"
-				" {\n"
-				"   vec2 coord_left = tc0stretch * vec2(1.f, 0.4898f);\n"
-				"   vec2 coord_right = coord_left + vec2(0.f, 0.510204f);\n"
-				"   left = texture(fs0, coord_left);\n"
-				"   right = texture(fs0, coord_right);\n"
-				" }\n"
-				"\n"
-				" return tc0.y > 0.5f ? right : left;\n"
+				"	return vec4(left.r, right.g, right.b, 1.);\n"
 				"}\n"
 				"\n"
 				"void main()\n"
 				"{\n"
-				" vec4 color = read_source();\n"
-				" color.rgb = pow(color.rgb, vec3(gamma));\n"
-				" if (limit_range > 0)\n"
-				"   ocol = ((color * 220.) + 16.) / 255.;\n"
-				" else\n"
-				"   ocol = color;\n"
+				"	vec4 color = read_source();\n"
+				"	color.rgb = pow(color.rgb, vec3(gamma));\n"
+				"	if (limit_range > 0)\n"
+				"		ocol = ((color * 220.) + 16.) / 255.;\n"
+				"	else\n"
+				"		ocol = color;\n"
 				"}\n";
 
 			renderpass_config.set_depth_mask(false);

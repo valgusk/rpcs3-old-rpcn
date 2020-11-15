@@ -41,6 +41,12 @@ vm::ptr<void> avc2_cb_arg{};
 error_code cellSysutilAvc2GetPlayerInfo(vm::cptr<SceNpMatching2RoomMemberId> player_id, vm::ptr<CellSysutilAvc2PlayerInfo> player_info)
 {
 	cellSysutilAvc2.todo("cellSysutilAvc2GetPlayerInfo(player_id=*0x%x, player_info=*0x%x)", player_id, player_info);
+
+	player_info->connected = 1;
+	player_info->joined = 1;
+	player_info->mic_attached = 0;
+	player_info->member_id = *player_id;
+
 	return CELL_OK;
 }
 
@@ -312,7 +318,16 @@ error_code cellSysutilAvc2SetStreamPriority(u8 priority)
 
 error_code cellSysutilAvc2LeaveChatRequest()
 {
-	cellSysutilAvc2.todo("cellSysutilAvc2LeaveChatRequest()");
+	cellSysutilAvc2.notice("cellSysutilAvc2LeaveChatRequest()");
+
+	if (avc2_cb)
+	{
+		sysutil_register_cb([=](ppu_thread& cb_ppu) -> s32 {
+			avc2_cb(cb_ppu, CELL_AVC2_EVENT_LEAVE_SUCCEEDED, 0, avc2_cb_arg);
+			return 0;
+		});
+	}
+
 	return CELL_OK;
 }
 
@@ -334,6 +349,7 @@ error_code cellSysutilAvc2CreateWindow(SceNpMatching2RoomMemberId member_id)
 error_code cellSysutilAvc2GetSpeakerMuting(vm::ptr<u8> muting)
 {
 	cellSysutilAvc2.todo("cellSysutilAvc2GetSpeakerMuting(muting=*0x%x)", muting);
+	*muting = 1;
 	return CELL_OK;
 }
 
@@ -352,6 +368,13 @@ error_code cellSysutilAvc2SetWindowSize(SceNpMatching2RoomMemberId member_id, f3
 error_code cellSysutilAvc2EnumPlayers(vm::ptr<s32> players_num, vm::ptr<SceNpMatching2RoomMemberId> players_id)
 {
 	cellSysutilAvc2.todo("cellSysutilAvc2EnumPlayers(players_num=*0x%x, players_id=*0x%x)", players_num, players_id);
+
+	if (players_num)
+		*players_num = 1;
+	
+	if (players_id)
+		*players_id = 1;
+
 	return CELL_OK;
 }
 

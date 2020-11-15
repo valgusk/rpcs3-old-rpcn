@@ -8,7 +8,7 @@
 
 inline void try_start(spu_thread& spu)
 {
-	std::shared_lock lock(spu.run_ctrl_mtx);
+	reader_lock lock(spu.run_ctrl_mtx);
 
 	if (spu.status_npc.fetch_op([](typename spu_thread::status_npc_sync_var& value)
 	{
@@ -22,7 +22,7 @@ inline void try_start(spu_thread& spu)
 	}).second)
 	{
 		spu.state -= cpu_flag::stop;
-		thread_ctrl::raw_notify(static_cast<named_thread<spu_thread>&>(spu));
+		thread_ctrl::notify(static_cast<named_thread<spu_thread>&>(spu));
 	}
 };
 
@@ -90,7 +90,7 @@ bool spu_thread::read_reg(const u32 addr, u32& value)
 			if (cmd.size)
 			{
 				// Perform transfer immediately
-				do_dma_transfer(cmd);
+				do_dma_transfer(nullptr, cmd, ls);
 			}
 
 			if (cmd.cmd & MFC_START_MASK)
@@ -322,18 +322,21 @@ bool spu_thread::write_reg(const u32 addr, const u32 value)
 void spu_load_exec(const spu_exec_object& elf)
 {
 	auto ls0 = vm::cast(vm::falloc(RAW_SPU_BASE_ADDR, SPU_LS_SIZE, vm::spu));
-	auto spu = idm::make_ptr<named_thread<spu_thread>>("TEST_SPU", ls0, nullptr, 0, "", 0);
 
 	spu_thread::g_raw_spu_ctr++;
-	spu_thread::g_raw_spu_id[0] = spu->id;
 
 	for (const auto& prog : elf.progs)
 	{
 		if (prog.p_type == 0x1u /* LOAD */ && prog.p_memsz)
 		{
-			std::memcpy(spu->_ptr<void>(prog.p_vaddr), prog.bin.data(), prog.p_filesz);
+			std::memcpy(vm::base(ls0 + prog.p_vaddr), prog.bin.data(), prog.p_filesz);
 		}
 	}
 
+	auto spu = idm::make_ptr<named_thread<spu_thread>>("TEST_SPU", ls0, nullptr, 0, "", 0);
+
+	spu_thread::g_raw_spu_id[0] = spu->id;
+
 	spu->status_npc = {SPU_STATUS_RUNNING, elf.header.e_entry};
+	atomic_storage<u32>::release(spu->pc, elf.header.e_entry);
 }

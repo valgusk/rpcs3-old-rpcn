@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "cellCamera.h"
 
+#include "Emu/System.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/Cell/lv2/sys_event.h"
 #include "Emu/IdManager.h"
@@ -26,7 +27,9 @@ void fmt_class_string<CellCameraError>::format(std::string& out, u64 arg)
 		STR_CASE(CELL_CAMERA_ERROR_RESOLUTION_UNKNOWN);
 		STR_CASE(CELL_CAMERA_ERROR_BAD_FRAMERATE);
 		STR_CASE(CELL_CAMERA_ERROR_TIMEOUT);
+		STR_CASE(CELL_CAMERA_ERROR_BUSY);
 		STR_CASE(CELL_CAMERA_ERROR_FATAL);
+		STR_CASE(CELL_CAMERA_ERROR_MUTEX);
 		}
 
 		return unknown;

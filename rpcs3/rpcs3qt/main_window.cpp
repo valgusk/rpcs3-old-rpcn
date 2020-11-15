@@ -482,20 +482,36 @@ void main_window::BootRsxCapture(std::string path)
 	}
 }
 
-void main_window::InstallPackages(QStringList file_paths, bool show_confirm)
+bool main_window::InstallRapFile(const QString& path, const std::string& filename)
+{
+	if (path.isEmpty() || filename.empty())
+	{
+		return false;
+	}
+	return fs::copy_file(sstr(path), Emulator::GetHddDir() + "/home/" + Emu.GetUsr() + "/exdata/" + filename, true);
+}
+
+void main_window::InstallPackages(QStringList file_paths)
 {
 	if (file_paths.isEmpty())
 	{
+		// If this function was called without a path, ask the user for files to install.
 		const QString path_last_pkg = m_gui_settings->GetValue(gui::fd_install_pkg).toString();
-		const QString file_path = QFileDialog::getOpenFileName(this, tr("Select PKG To Install"), path_last_pkg, tr("PKG files (*.pkg);;All files (*.*)"));
+		const QStringList paths = QFileDialog::getOpenFileNames(this, tr("Select packages and/or rap files to install"),
+			path_last_pkg, tr("All relevant (*.pkg *.rap);;Package files (*.pkg);;Rap files (*.rap);;All files (*.*)"));
 
-		if (!file_path.isEmpty())
+		if (paths.isEmpty())
 		{
-			file_paths.append(file_path);
+			return;
 		}
+
+		file_paths.append(paths);
+		const QFileInfo file_info(file_paths[0]);
+		m_gui_settings->SetValue(gui::fd_install_pkg, file_info.path());
 	}
-	else if (show_confirm)
+	else if (file_paths.count() == 1)
 	{
+		// This can currently only happen by drag and drop.
 		if (QMessageBox::question(this, tr("PKG Decrypter / Installer"), tr("Install package: %1?").arg(file_paths.front()),
 			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		{
@@ -504,14 +520,51 @@ void main_window::InstallPackages(QStringList file_paths, bool show_confirm)
 		}
 	}
 
-	if (!file_paths.isEmpty())
+	// Install rap files if available
+	for (const auto& rap : file_paths.filter(QRegExp(".*\\.rap")))
 	{
-		// Handle the actual installations with a timeout. Otherwise the source explorer instance is not usable during the following file processing.
-		QTimer::singleShot(0, [this, file_paths]()
+		const QFileInfo file_info(rap);
+		const std::string rapname = sstr(file_info.fileName());
+
+		if (InstallRapFile(rap, rapname))
 		{
-			HandlePackageInstallation(file_paths);
-		});
+			gui_log.success("Successfully copied rap file: %s", rapname);
+		}
+		else
+		{
+			gui_log.error("Could not copy rap file: %s", rapname);
+		}
 	}
+
+	// Find remaining package files
+	file_paths = file_paths.filter(QRegExp(".*\\.pkg", Qt::CaseInsensitive));
+
+	if (file_paths.isEmpty())
+	{
+		return;
+	}
+
+	// Let the user choose the packages to install and select the order in which they shall be installed.
+	if (file_paths.size() > 1)
+	{
+		pkg_install_dialog dlg(file_paths, this);
+		connect(&dlg, &QDialog::accepted, [&file_paths, &dlg]()
+		{
+			file_paths = dlg.GetPathsToInstall();
+		});
+		dlg.exec();
+	}
+
+	if (file_paths.empty())
+	{
+		return;
+	}
+
+	// Handle the actual installations with a timeout. Otherwise the source explorer instance is not usable during the following file processing.
+	QTimer::singleShot(0, [this, file_paths]()
+	{
+		HandlePackageInstallation(file_paths);
+	});
 }
 
 void main_window::HandlePackageInstallation(QStringList file_paths)
@@ -551,8 +604,6 @@ void main_window::HandlePackageInstallation(QStringList file_paths)
 		const QFileInfo file_info(file_path);
 		const std::string path = sstr(file_path);
 		const std::string file_name = sstr(file_info.fileName());
-
-		m_gui_settings->SetValue(gui::fd_install_pkg, file_info.path());
 
 		// Run PKG unpacking asynchronously
 		named_thread worker("PKG Installer", [path, &progress, &error]
@@ -1527,6 +1578,9 @@ void main_window::CreateConnects()
 	connect(ui->confAudioAct,  &QAction::triggered, [=, this]() { open_settings(2); });
 	connect(ui->confIOAct,     &QAction::triggered, [=, this]() { open_settings(3); });
 	connect(ui->confSystemAct, &QAction::triggered, [=, this]() { open_settings(4); });
+	connect(ui->confAdvAct,    &QAction::triggered, [=, this]() { open_settings(6); });
+	connect(ui->confEmuAct,    &QAction::triggered, [=, this]() { open_settings(7); });
+	connect(ui->confGuiAct,    &QAction::triggered, [=, this]() { open_settings(8); });
 
 	auto open_pad_settings = [this]
 	{
@@ -1551,7 +1605,7 @@ void main_window::CreateConnects()
 
 	connect(ui->confSavedataManagerAct, &QAction::triggered, [this]
 	{
-		save_manager_dialog* save_manager = new save_manager_dialog(m_gui_settings);
+		save_manager_dialog* save_manager = new save_manager_dialog(m_gui_settings, m_persistent_settings);
 		connect(this, &main_window::RequestTrophyManagerRepaint, save_manager, &save_manager_dialog::HandleRepaintUiRequest);
 		save_manager->show();
 	});
@@ -1588,13 +1642,13 @@ void main_window::CreateConnects()
 				}
 			}
 		}
-		patch_manager_dialog patch_manager(m_gui_settings, games, this);
+		patch_manager_dialog patch_manager(m_gui_settings, games, "", this);
 		patch_manager.exec();
  	});
 
 	connect(ui->actionManage_Users, &QAction::triggered, [this]
 	{
-		user_manager_dialog user_manager(m_gui_settings, this);
+		user_manager_dialog user_manager(m_gui_settings, m_persistent_settings, this);
 		user_manager.exec();
 		m_game_list_frame->Refresh(true); // New user may have different games unlocked.
 	});
@@ -2291,23 +2345,7 @@ void main_window::dropEvent(QDropEvent* event)
 	}
 	case drop_type::drop_pkg: // install the packages
 	{
-		if (drop_paths.count() > 1)
-		{
-			pkg_install_dialog dlg(drop_paths, this);
-			connect(&dlg, &QDialog::accepted, [this, &dlg]()
-			{
-				const QStringList paths = dlg.GetPathsToInstall();
-				if (!paths.isEmpty())
-				{
-					InstallPackages(paths, false);
-				}
-			});
-			dlg.exec();
-		}
-		else
-		{
-			InstallPackages(drop_paths, true);
-		}
+		InstallPackages(drop_paths);
 		break;
 	}
 	case drop_type::drop_pup: // install the firmware
@@ -2317,22 +2355,28 @@ void main_window::dropEvent(QDropEvent* event)
 	}
 	case drop_type::drop_rap: // import rap files to exdata dir
 	{
+		int installed_rap_count = 0;
+
 		for (const auto& rap : drop_paths)
 		{
 			const std::string rapname = sstr(QFileInfo(rap).fileName());
 
-			if (!fs::copy_file(sstr(rap), Emulator::GetHddDir() + "/home/" + Emu.GetUsr() + "/exdata/" + rapname, false))
+			if (InstallRapFile(rap, rapname))
 			{
-				gui_log.warning("Could not copy rap file by drop: %s", rapname);
+				gui_log.success("Successfully copied rap file by drop: %s", rapname);
+				installed_rap_count++;
 			}
 			else
 			{
-				gui_log.success("Successfully copied rap file by drop: %s", rapname);
+				gui_log.error("Could not copy rap file by drop: %s", rapname);
 			}
 		}
 
-		// Refresh game list since we probably unlocked some games now.
-		m_game_list_frame->Refresh(true);
+		if (installed_rap_count > 0)
+		{
+			// Refresh game list since we probably unlocked some games now.
+			m_game_list_frame->Refresh(true);
+		}
 		break;
 	}
 	case drop_type::drop_dir: // import valid games to gamelist (games.yaml)

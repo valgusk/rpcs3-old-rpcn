@@ -25,6 +25,8 @@
 
 #include "Emu/NP/np_handler.h"
 
+#include <shared_mutex>
+
 LOG_CHANNEL(sys_net);
 
 template<>
@@ -256,7 +258,7 @@ struct nt_p2p_port
 	shared_mutex bound_p2p_ports_mutex;
 	std::map<u16, s32> bound_p2p_ports{};
 	// Queued messages from RPCN
-	std::shared_mutex s_rpcn_mutex;
+	shared_mutex s_rpcn_mutex;
 	std::queue<std::vector<u8>> rpcn_msgs{};
 
 	std::array<u8, 65535> p2p_recv_data{};
@@ -371,7 +373,7 @@ struct network_thread
 	shared_mutex s_nw_mutex;
 	static constexpr auto thread_name = "Network Thread";
 
-	std::shared_mutex list_p2p_ports_mutex;
+	shared_mutex list_p2p_ports_mutex;
 	std::map<u16, nt_p2p_port> list_p2p_ports{};
 
 	network_thread() noexcept

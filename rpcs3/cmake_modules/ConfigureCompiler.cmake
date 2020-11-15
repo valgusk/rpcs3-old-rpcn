@@ -26,7 +26,8 @@ else()
 	add_compile_options(-fno-exceptions)
 	add_compile_options(-ftemplate-depth=1024)
 	add_compile_options(-msse -msse2 -mcx16)
-	
+
+	add_compile_options(-Werror=old-style-cast)
 	add_compile_options(-Werror=sign-compare)
 	add_compile_options(-Werror=reorder)
 

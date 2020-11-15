@@ -24,6 +24,7 @@
 
 #include "Emu/Cell/lv2/sys_rsx.h"
 #include "Emu/IdManager.h"
+#include "Emu/system_config.h"
 
 extern u64 get_guest_system_time();
 extern u64 get_system_time();
@@ -43,6 +44,7 @@ namespace rsx
 	{
 		std::array<atomic_t<u32>, 4096> ea;
 		std::array<atomic_t<u32>, 4096> io;
+		std::array<shared_mutex, 4096> rs;
 
 		rsx_iomap_table() noexcept
 		{
@@ -55,6 +57,46 @@ namespace rsx
 		u32 get_addr(u32 offs) const noexcept
 		{
 			return this->ea[offs >> 20] | (offs & 0xFFFFF);
+		}
+
+		template<bool IsFullLock>
+		bool lock(u32 addr, u32 len) noexcept
+		{
+			if (len <= 1) return false;
+			const u32 end = addr + len - 1;
+
+			for (u32 block = (addr >> 20); block <= (end >> 20); ++block)
+			{
+				if constexpr (IsFullLock)
+				{
+					rs[block].lock();
+				}
+				else
+				{
+					rs[block].lock_shared();
+				}
+			}
+
+			return true;
+		}
+
+		template<bool IsFullLock>
+		void unlock(u32 addr, u32 len) noexcept
+		{
+			ASSERT(len >= 1);
+			const u32 end = addr + len - 1;
+
+			for (u32 block = (addr >> 20); block <= (end >> 20); ++block)
+			{
+				if constexpr (IsFullLock)
+				{
+					rs[block].unlock();
+				}
+				else
+				{
+					rs[block].unlock_shared();
+				}
+			}
 		}
 	};
 
@@ -78,14 +120,16 @@ namespace rsx
 		fragment_texture_state_dirty = 0x80, // Fragment texture parameters changed
 		vertex_texture_state_dirty = 0x100,  // Fragment texture parameters changed
 		scissor_config_state_dirty = 0x200,  // Scissor region changed
+		zclip_config_state_dirty = 0x400,    // Viewport Z clip changed
 
-		scissor_setup_invalid = 0x400,       // Scissor configuration is broken
-		scissor_setup_clipped = 0x800,       // Scissor region is cropped by viewport constraint
+		scissor_setup_invalid = 0x800,       // Scissor configuration is broken
+		scissor_setup_clipped = 0x1000,      // Scissor region is cropped by viewport constraint
 
-		polygon_stipple_pattern_dirty = 0x1000,  // Rasterizer stippling pattern changed
-		line_stipple_pattern_dirty = 0x2000,     // Line stippling pattern changed
+		polygon_stipple_pattern_dirty = 0x2000,  // Rasterizer stippling pattern changed
+		line_stipple_pattern_dirty = 0x4000,     // Line stippling pattern changed
 
 		invalidate_pipeline_bits = fragment_program_dirty | vertex_program_dirty,
+		invalidate_zclip_bits = vertex_state_dirty | zclip_config_state_dirty,
 		memory_barrier_bits = framebuffer_reads_dirty,
 		all_dirty = ~0u
 	};
@@ -340,10 +384,10 @@ namespace rsx
 		bool zeta_write_enabled;
 		rsx::surface_target target;
 		rsx::surface_color_format color_format;
-		rsx::surface_depth_format depth_format;
+		rsx::surface_depth_format2 depth_format;
 		rsx::surface_antialiasing aa_mode;
+		rsx::surface_raster_type raster_type;
 		u32 aa_factors[2];
-		bool depth_float;
 		bool ignore_change;
 	};
 
@@ -962,4 +1006,65 @@ namespace rsx
 	{
 		return g_fxo->get<rsx::thread>();
 	}
+
+	template<bool IsFullLock = false>
+	class reservation_lock
+	{
+		u32 addr = 0, length = 0;
+		bool locked = false;
+
+		inline void lock_range(u32 addr, u32 length)
+		{
+			this->addr = addr;
+			this->length = length;
+
+			auto renderer = get_current_renderer();
+			this->locked = renderer->iomap_table.lock<IsFullLock>(addr, length);
+		}
+
+	public:
+		reservation_lock(u32 addr, u32 length)
+		{
+			if (g_cfg.core.rsx_accurate_res_access &&
+				addr < constants::local_mem_base)
+			{
+				lock_range(addr, length);
+			}
+		}
+
+		// Multi-range lock. If ranges overlap, the combined range will be acquired.
+		// If ranges do not overlap, the first range that is in main memory will be acquired.
+		reservation_lock(u32 dst_addr, u32 dst_length, u32 src_addr, u32 src_length)
+		{
+			if (g_cfg.core.rsx_accurate_res_access)
+			{
+				const auto range1 = utils::address_range::start_length(dst_addr, dst_length);
+				const auto range2 = utils::address_range::start_length(src_addr, src_length);
+				utils::address_range target_range;
+
+				if (!range1.overlaps(range2)) [[likely]]
+				{
+					target_range = (dst_addr < constants::local_mem_base) ? range1 : range2;
+				}
+				else
+				{
+					// Very unlikely
+					target_range = range1.get_min_max(range2);
+				}
+
+				if (target_range.start < constants::local_mem_base)
+				{
+					lock_range(target_range.start, target_range.length());
+				}
+			}
+		}
+
+		~reservation_lock()
+		{
+			if (locked)
+			{
+				get_current_renderer()->iomap_table.unlock<IsFullLock>(addr, length);
+			}
+		}
+	};
 }

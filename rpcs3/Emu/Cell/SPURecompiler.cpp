@@ -192,9 +192,6 @@ DECLARE(spu_runtime::g_gateway) = build_function_asm<spu_function_t>([](asmjit::
 	c.push(x86::rax);
 #endif
 
-	// Load tr_all function pointer to call actual compiled function
-	c.mov(x86::rax, asmjit::imm_ptr(spu_runtime::tr_all));
-
 	// Save native stack pointer for longjmp emulation
 	c.mov(x86::qword_ptr(args[0], ::offset32(&spu_thread::saved_native_sp)), x86::rsp);
 
@@ -209,7 +206,7 @@ DECLARE(spu_runtime::g_gateway) = build_function_asm<spu_function_t>([](asmjit::
 		c.vzeroupper();
 	}
 
-	c.call(x86::rax);
+	c.call(asmjit::imm_ptr(spu_runtime::tr_all));
 
 	if (utils::has_avx())
 	{
@@ -3144,7 +3141,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point)
 
 void spu_recompiler_base::dump(const spu_program& result, std::string& out)
 {
-	SPUDisAsm dis_asm(CPUDisAsm_InterpreterMode);
+	SPUDisAsm dis_asm(CPUDisAsm_DumpMode);
 	dis_asm.offset = reinterpret_cast<const u8*>(result.data.data()) - result.lower_bound;
 
 	std::string hash;
@@ -3421,14 +3418,14 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 	}
 
 	// Create tail call to the function chunk (non-tail calls are just out of question)
-	void tail_chunk(llvm::Value* chunk, llvm::Value* base_pc = nullptr)
+	void tail_chunk(llvm::FunctionCallee callee, llvm::Value* base_pc = nullptr)
 	{
-		if (!chunk && !g_cfg.core.spu_verification)
+		if (!callee && !g_cfg.core.spu_verification)
 		{
 			// Disable patchpoints if verification is disabled
-			chunk = m_dispatch;
+			callee = m_dispatch;
 		}
-		else if (!chunk)
+		else if (!callee)
 		{
 			// Create branch patchpoint if chunk == nullptr
 			verify(HERE), m_finfo, !m_finfo->fn || m_function == m_finfo->chunk;
@@ -3447,12 +3444,13 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 				return;
 			}
 
-			chunk = ppfunc;
+			callee = ppfunc;
 			base_pc = m_ir->getInt32(0);
 		}
 
-		auto call = m_ir->CreateCall(chunk, {m_thread, m_lsptr, base_pc ? base_pc : m_base_pc});
-		auto func = m_finfo ? m_finfo->chunk : llvm::cast<llvm::Function>(chunk);
+		verify(HERE), callee;
+		auto call = m_ir->CreateCall(callee, {m_thread, m_lsptr, base_pc ? base_pc : m_base_pc});
+		auto func = m_finfo ? m_finfo->chunk : llvm::dyn_cast<llvm::Function>(callee.getCallee());
 		call->setCallingConv(func->getCallingConv());
 		call->setTailCall();
 
@@ -4344,7 +4342,7 @@ public:
 
 			for (u32 j = starta; j < end; j += 32)
 			{
-				u32 indices[8];
+				int indices[8];
 				bool holes = false;
 				bool data = false;
 
@@ -4376,7 +4374,7 @@ public:
 				// Mask if necessary
 				if (holes)
 				{
-					vls = m_ir->CreateShuffleVector(vls, ConstantVector::getSplat(8, m_ir->getInt32(0)), indices);
+					vls = m_ir->CreateShuffleVector(vls, ConstantAggregateZero::get(vls->getType()), indices);
 				}
 
 				// Perform bitwise comparison and accumulate
@@ -4422,7 +4420,8 @@ public:
 		// Proceed to the next code
 		if (entry_chunk->chunk->getReturnType() != get_type<void>())
 		{
-			const auto next_call = m_ir->CreateCall(m_ir->CreateBitCast(entry_call, main_func->getType()), {m_thread, m_lsptr, m_ir->getInt64(0)});
+			const auto f_ptr = m_ir->CreateBitCast(entry_call, main_func->getType());
+			const auto next_call = m_ir->CreateCall({main_func->getFunctionType(), f_ptr}, {m_thread, m_lsptr, m_ir->getInt64(0)});
 			next_call->setCallingConv(main_func->getCallingConv());
 			next_call->setTailCall();
 		}
@@ -4459,7 +4458,8 @@ public:
 
 		if (entry_chunk->chunk->getReturnType() == get_type<void>())
 		{
-			const auto next_call = m_ir->CreateCall(m_ir->CreateBitCast(dispatcher, main_func->getType()), {m_thread, m_lsptr, m_ir->getInt64(0)});
+			const auto f_ptr = m_ir->CreateBitCast(dispatcher, main_func->getType());
+			const auto next_call = m_ir->CreateCall({main_func->getFunctionType(), f_ptr}, {m_thread, m_lsptr, m_ir->getInt64(0)});
 			next_call->setCallingConv(main_func->getCallingConv());
 			next_call->setTailCall();
 			m_ir->CreateRetVoid();
@@ -4914,7 +4914,7 @@ public:
 
 		// Decode (shift) and load function pointer
 		const auto first = m_ir->CreateLoad(m_ir->CreateGEP(m_ir->CreateBitCast(m_interp_table, if_pptr), m_ir->CreateLShr(m_interp_op, 32u - m_interp_magn)));
-		const auto call0 = m_ir->CreateCall(first, {m_lsptr, m_thread, m_interp_pc, m_interp_op, m_interp_table, m_interp_7f0, m_interp_regs});
+		const auto call0 = m_ir->CreateCall({if_type, first}, {m_lsptr, m_thread, m_interp_pc, m_interp_op, m_interp_table, m_interp_7f0, m_interp_regs});
 		call0->setCallingConv(CallingConv::GHC);
 		m_ir->CreateRetVoid();
 
@@ -5128,7 +5128,7 @@ public:
 							}
 
 							const auto arg3 = UndefValue::get(get_type<u32>());
-							const auto _ret = m_ir->CreateCall(fret, {m_lsptr, m_thread, m_interp_pc, arg3, m_interp_table, m_interp_7f0, m_interp_regs});
+							const auto _ret = m_ir->CreateCall({if_type, fret}, {m_lsptr, m_thread, m_interp_pc, arg3, m_interp_table, m_interp_7f0, m_interp_regs});
 							_ret->setCallingConv(CallingConv::GHC);
 							_ret->setTailCall();
 							m_ir->CreateRetVoid();
@@ -5152,7 +5152,7 @@ public:
 								m_interp_regs = _ptr(m_thread, get_reg_offset(0));
 							}
 
-							const auto ncall = m_ir->CreateCall(next_if, {m_lsptr, m_thread, m_interp_pc, next_op, m_interp_table, m_interp_7f0, m_interp_regs});
+							const auto ncall = m_ir->CreateCall({if_type, next_if}, {m_lsptr, m_thread, m_interp_pc, next_op, m_interp_table, m_interp_7f0, m_interp_regs});
 							ncall->setCallingConv(CallingConv::GHC);
 							ncall->setTailCall();
 							m_ir->CreateRetVoid();
@@ -5387,11 +5387,6 @@ public:
 
 	static u32 exec_read_events(spu_thread* _spu)
 	{
-		if (const u32 events = _spu->get_events())
-		{
-			return events;
-		}
-
 		// TODO
 		return exec_rdch(_spu, SPU_RdEventStat);
 	}
@@ -5490,7 +5485,7 @@ public:
 		}
 		case SPU_RdEventMask:
 		{
-			res.value = m_ir->CreateLoad(spu_ptr<u32>(&spu_thread::ch_event_mask));
+			res.value = m_ir->CreateTrunc(m_ir->CreateLShr(m_ir->CreateLoad(spu_ptr<u64>(&spu_thread::ch_events), true), 32), get_type<u32>());
 			break;
 		}
 		case SPU_RdEventStat:
@@ -5522,9 +5517,9 @@ public:
 		return _spu->get_ch_count(ch);
 	}
 
-	static u32 exec_get_events(spu_thread* _spu)
+	static u32 exec_get_events(spu_thread* _spu, u32 mask)
 	{
-		return _spu->get_events();
+		return _spu->get_events(mask).count;
 	}
 
 	llvm::Value* get_rchcnt(u32 off, u64 inv = 0)
@@ -5602,9 +5597,33 @@ public:
 		}
 		case SPU_RdEventStat:
 		{
-			res.value = call("spu_get_events", &exec_get_events, m_thread);
-			res.value = m_ir->CreateICmpNE(res.value, m_ir->getInt32(0));
-			res.value = m_ir->CreateZExt(res.value, get_type<u32>());
+			const auto mask = m_ir->CreateTrunc(m_ir->CreateLShr(m_ir->CreateLoad(spu_ptr<u64>(&spu_thread::ch_events), true), 32), get_type<u32>());
+			res.value = call("spu_get_events", &exec_get_events, m_thread, mask);
+			break;
+		}
+
+		// Channels with a constant count of 1:
+		case SPU_WrEventMask:
+		case SPU_WrEventAck:
+		case SPU_WrDec:
+		case SPU_RdDec:
+		case SPU_RdEventMask:
+		case SPU_RdMachStat:
+		case SPU_WrSRR0:
+		case SPU_RdSRR0:
+		case SPU_Set_Bkmk_Tag:
+		case SPU_PM_Start_Ev:
+		case SPU_PM_Stop_Ev:
+		case MFC_RdTagMask:
+		case MFC_LSA:
+		case MFC_EAH:
+		case MFC_EAL:
+		case MFC_Size:
+		case MFC_TagID:
+		case MFC_WrTagMask:
+		case MFC_WrListStallAck:
+		{
+			res.value = m_ir->getInt32(1);
 			break;
 		}
 
@@ -5788,14 +5807,14 @@ public:
 
 			if (auto ci = llvm::dyn_cast<llvm::ConstantInt>(trunc<u8>(val).eval(m_ir)))
 			{
+				if (g_cfg.core.spu_accurate_dma)
+				{
+					break;
+				}
+
 				if (u64 cmdh = ci->getZExtValue() & ~(MFC_BARRIER_MASK | MFC_FENCE_MASK | MFC_RESULT_MASK); !g_use_rtm)
 				{
 					// TODO: don't require TSX (current implementation is TSX-only)
-					if (cmdh == MFC_GET_CMD && g_cfg.core.spu_accurate_putlluc)
-					{
-						break;
-					}
-
 					if (cmdh == MFC_PUT_CMD || cmdh == MFC_SNDSIG_CMD)
 					{
 						break;
@@ -5966,6 +5985,8 @@ public:
 						call("spu_memcpy", +spu_memcpy, dst, src, zext<u32>(size).eval(m_ir));
 					}
 
+					// Disable certain thing
+					m_ir->CreateStore(m_ir->getInt32(0), spu_ptr<u32>(&spu_thread::last_faddr));
 					m_ir->CreateBr(next);
 					break;
 				}
@@ -6092,21 +6113,14 @@ public:
 		}
 		case SPU_WrDec:
 		{
+			call("spu_get_events", &exec_get_events, m_thread, m_ir->getInt32(SPU_EVENT_TM));
 			m_ir->CreateStore(call("get_timebased_time", &get_timebased_time), spu_ptr<u64>(&spu_thread::ch_dec_start_timestamp));
 			m_ir->CreateStore(val.value, spu_ptr<u32>(&spu_thread::ch_dec_value));
 			return;
 		}
-		case SPU_WrEventMask:
-		{
-			m_ir->CreateStore(val.value, spu_ptr<u32>(&spu_thread::ch_event_mask))->setVolatile(true);
-			return;
-		}
-		case SPU_WrEventAck:
-		{
-			m_ir->CreateAtomicRMW(llvm::AtomicRMWInst::And, spu_ptr<u32>(&spu_thread::ch_event_stat), eval(~val).value, llvm::AtomicOrdering::Release);
-			return;
-		}
-		case 69:
+		case SPU_Set_Bkmk_Tag:
+		case SPU_PM_Start_Ev:
+		case SPU_PM_Stop_Ev:
 		{
 			return;
 		}
@@ -7116,7 +7130,7 @@ public:
 				set_vr(op.rt4, select(noncast<s32[4]>(c) != 0, get_vr<u32[4]>(op.rb), get_vr<u32[4]>(op.ra)));
 				return;
 			}
-			
+
 			bool sel_16 = true;
 			for (u32 i = 0; i < 8; i++)
 			{
@@ -7132,7 +7146,7 @@ public:
 				set_vr(op.rt4, select(bitcast<s16[8]>(c) != 0, get_vr<u16[8]>(op.rb), get_vr<u16[8]>(op.ra)));
 				return;
 			}
-			
+
 			bool sel_8 = true;
 			for (u32 i = 0; i < 16; i++)
 			{
@@ -7277,10 +7291,20 @@ public:
 		{
 			if (auto [ok, v1] = match_expr(b, byteswap(match<u8[16]>())); ok)
 			{
-				// Undo endian swapping, and rely on pshufb to re-reverse endianness
-				const auto x = avg(noncast<u8[16]>(sext<s8[16]>((c & 0xc0) == 0xc0)), noncast<u8[16]>(sext<s8[16]>((c & 0xe0) == 0xc0)));
+				// Undo endian swapping, and rely on pshufb/vperm2b to re-reverse endianness
 				const auto as = byteswap(a);
 				const auto bs = byteswap(b);
+
+				if (m_use_avx512_icl && (op.ra != op.rb || m_interp_magn))
+				{
+					const auto m = gf2p8affineqb(build<u8[16]>(0x02, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x02, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04), c, 0x7f);
+					const auto mm = select(noncast<s8[16]>(m) >= 0, splat<u8[16]>(0), m);
+					const auto ab = vperm2b(as, bs, c);
+					set_vr(op.rt4, select(noncast<s8[16]>(c) >= 0, ab, mm));
+					return;
+				}
+
+				const auto x = avg(noncast<u8[16]>(sext<s8[16]>((c & 0xc0) == 0xc0)), noncast<u8[16]>(sext<s8[16]>((c & 0xe0) == 0xc0)));
 				const auto ax = pshufb(as, c);
 				const auto bx = pshufb(bs, c);
 				set_vr(op.rt4, select(noncast<s8[16]>(c << 3) >= 0, ax, bx) | x);
@@ -7317,6 +7341,16 @@ public:
 					return;
 				}
 			}
+		}
+
+		if (m_use_avx512_icl && (op.ra != op.rb || m_interp_magn))
+		{
+			const auto m = gf2p8affineqb(build<u8[16]>(0x02, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x02, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04), c, 0x7f);
+			const auto mm = select(noncast<s8[16]>(m) >= 0, splat<u8[16]>(0), m);
+			const auto cr = eval(~c);
+			const auto ab = vperm2b(b, a, cr);
+			set_vr(op.rt4, select(noncast<s8[16]>(cr) >= 0, mm, ab));
+			return;
 		}
 
 		const auto x = avg(noncast<u8[16]>(sext<s8[16]>((c & 0xc0) == 0xc0)), noncast<u8[16]>(sext<s8[16]>((c & 0xe0) == 0xc0)));
@@ -7483,13 +7517,14 @@ public:
 	}
 
 	// Checks for postive and negative zero, or Denormal (treated as zero)
-	bool is_spu_float_zero(v128 a)
+	// If sign is +-1 check equality againts all sign bits
+	bool is_spu_float_zero(v128 a, int sign = 0)
 	{
 		for (u32 i = 0; i < 4; i++)
 		{
 			const u32 exponent = a._u32[i] & 0x7f800000u;
 
-			if (exponent)
+			if (exponent || (sign && (sign >= 0) != (a._s32[i] >= 0)))
 			{
 				// Normalized number
 				return false;
@@ -7531,63 +7566,53 @@ public:
 			return;
 		}
 
-		const auto a = get_vr<f32[4]>(op.ra);
-		const auto b = get_vr<f32[4]>(op.rb);
+		const auto [a, b] = get_vrs<f32[4]>(op.ra, op.rb);
+		const value_t<f32[4]> ab[2]{a, b};
 
-		if (auto [ok, data] = get_const_vector(b.value, m_pos, 5000); ok)
+		std::bitset<2> safe_int_compare(0);
+		std::bitset<2> safe_nonzero_compare(0);
+
+		for (u32 i = 0; i < 2; i++)
 		{
-			bool safe_int_compare = true;
-
-			for (u32 i = 0; i < 4; i++)
+			if (auto [ok, data] = get_const_vector(ab[i].value, m_pos, 5000); ok)
 			{
-				const u32 exponent = data._u32[i] & 0x7f800000u;
+				safe_int_compare.set(i);
+				safe_nonzero_compare.set(i);
 
-				if (data._u32[i] >= 0x7f7fffffu || !exponent)
+				for (u32 j = 0; j < 4; j++)
 				{
-					// Postive or negative zero, Denormal (treated as zero), Negative constant, or Normalized number with exponent +127
-		 			// Cannot used signed integer compare safely
-					// Note: Technically this optimization is accurate for any positive value, but due to the fact that
-					// we don't produce "extended range" values the same way as real hardware, it's not safe to apply
-					// this optimization for values outside of the range of x86 floating point hardware.
-					safe_int_compare = false;
-				}
-			}
+					const u32 value = data._u32[j];
+					const u8 exponent = static_cast<u8>(value >> 23);
 
-			if (safe_int_compare)
-			{
-				set_vr(op.rt, sext<s32[4]>(bitcast<s32[4]>(a) > bitcast<s32[4]>(b)));
-				return;
+					if (value >= 0x7f7fffffu || !exponent)
+					{
+						// Postive or negative zero, Denormal (treated as zero), Negative constant, or Normalized number with exponent +127
+		 				// Cannot used signed integer compare safely
+						// Note: Technically this optimization is accurate for any positive value, but due to the fact that
+						// we don't produce "extended range" values the same way as real hardware, it's not safe to apply
+						// this optimization for values outside of the range of x86 floating point hardware.
+						safe_int_compare.reset(i);
+						if (!exponent) safe_nonzero_compare.reset(i);
+					}
+				}
 			}
 		}
 
-		if (auto [ok, data] = get_const_vector(a.value, m_pos, 5000); ok)
+		if (safe_int_compare.any())
 		{
-			bool safe_int_compare = true;
-
-			for (u32 i = 0; i < 4; i++)
-			{
-				const u32 exponent = data._u32[i] & 0x7f800000u;
-
-				if (data._u32[i] >= 0x7f7fffffu || !exponent)
-				{
-					// See above
-					safe_int_compare = false;
-					break;
-				}
-			}
-
-			if (safe_int_compare)
-			{
-				set_vr(op.rt, sext<s32[4]>(bitcast<s32[4]>(a) > bitcast<s32[4]>(b)));
-				return;
-			}
+			set_vr(op.rt, sext<s32[4]>(bitcast<s32[4]>(a) > bitcast<s32[4]>(b)));
+			return;
 		}
 
 		if (g_cfg.core.spu_approx_xfloat)
 		{
-			const auto ca = eval(clamp_positive_smax(a));
-			const auto cb = eval(clamp_negative_smax(b));
-			set_vr(op.rt, sext<s32[4]>(fcmp_ord(ca > cb)));
+			const auto ai = eval(bitcast<s32[4]>(a));
+			const auto bi = eval(bitcast<s32[4]>(b));
+
+			if (!safe_nonzero_compare.any())
+				set_vr(op.rt, sext<s32[4]>(fcmp_uno(a != b) & select((ai & bi) >= 0, ai > bi, ai < bi)));
+			else
+				set_vr(op.rt, sext<s32[4]>(select((ai & bi) >= 0, ai > bi, ai < bi)));
 		}
 		else
 		{
@@ -7727,28 +7752,58 @@ public:
 		// This is odd since SPU code could just use the FM instruction, but it seems common enough
 		if (auto [ok, data] = get_const_vector(c.value, m_pos, 4000); ok)
 		{
-			if (is_spu_float_zero(data))
+			if (is_spu_float_zero(data, -1))
 			{
 				r = eval(a * b);
 				return r;
 			}
-		}
 
-		if (auto [ok, data] = get_const_vector(b.value, m_pos, 4000); ok)
-		{
-			if (is_spu_float_zero(data))
+			if (!m_use_fma && is_spu_float_zero(data, +1))
 			{
-				// Just return the added value if either a or b is 0
-				return c;
+				r = eval(a * b + fsplat<f32[4]>(0.f));
+				return r;
 			}
 		}
 
-		if (auto [ok, data] = get_const_vector(a.value, m_pos, 4000); ok)
+		if ([&]()
 		{
-			if (is_spu_float_zero(data))
+			if (auto [ok, data] = get_const_vector(a.value, m_pos, 4000); ok)
 			{
-				return c;
+				if (!is_spu_float_zero(data, +1))
+				{
+					return false;
+				}
+
+				if (auto [ok0, data0] = get_const_vector(b.value, m_pos, 4000); ok0)
+				{
+					if (is_spu_float_zero(data0, +1))
+					{
+						return true;
+					}
+				}
 			}
+
+			if (auto [ok, data] = get_const_vector(a.value, m_pos, 4000); ok)
+			{
+				if (!is_spu_float_zero(data, -1))
+				{
+					return false;
+				}
+
+				if (auto [ok0, data0] = get_const_vector(b.value, m_pos, 4000); ok0)
+				{
+					if (is_spu_float_zero(data0, -1))
+					{
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}())
+		{
+			// Just return the added value if both a and b is +0 or -0 (+0 and -0 arent't allowed alone)
+			return c;
 		}
 
 		if (m_use_fma)
@@ -8236,7 +8291,7 @@ public:
 	{
 		_spu->set_interrupt_status(true);
 
-		if ((_spu->ch_event_mask & _spu->ch_event_stat & SPU_EVENT_INTR_IMPLEMENTED) > 0)
+		if (_spu->ch_events.load().count)
 		{
 			_spu->interrupts_enabled = false;
 			_spu->srr0 = addr;
@@ -8353,7 +8408,9 @@ public:
 			// Clear stack mirror and return by tail call to the provided return address
 			m_ir->CreateStore(splat<u64[2]>(-1).eval(m_ir), m_ir->CreateBitCast(m_ir->CreateGEP(m_thread, stack0.value), get_type<u64(*)[2]>()));
 			const auto targ = m_ir->CreateAdd(m_ir->CreateLShr(_ret, 32), get_segment_base());
-			tail_chunk(m_ir->CreateIntToPtr(targ, m_finfo->chunk->getFunctionType()->getPointerTo()), m_ir->CreateTrunc(m_ir->CreateLShr(link, 32), get_type<u32>()));
+			const auto type = m_finfo->chunk->getFunctionType();
+			const auto fval = m_ir->CreateIntToPtr(targ, type->getPointerTo());
+			tail_chunk({type, fval}, m_ir->CreateTrunc(m_ir->CreateLShr(link, 32), get_type<u32>()));
 			m_ir->SetInsertPoint(fail);
 		}
 
@@ -8368,7 +8425,7 @@ public:
 
 			const auto ad64 = m_ir->CreateZExt(ad32, get_type<u64>());
 			const auto pptr = m_ir->CreateGEP(m_function_table, {m_ir->getInt64(0), m_ir->CreateLShr(ad64, 2, "", true)});
-			tail_chunk(m_ir->CreateLoad(pptr));
+			tail_chunk({m_dispatch->getFunctionType(), m_ir->CreateLoad(pptr)});
 			m_ir->SetInsertPoint(fail);
 		}
 
@@ -8542,7 +8599,8 @@ public:
 		if (m_block) m_block->block_end = m_ir->GetInsertBlock();
 		const auto addr = eval(extract(get_vr(op.ra), 3) & 0x3fffc);
 		set_link(op);
-		const auto res = call("spu_get_events", &exec_get_events, m_thread);
+		const auto mask = m_ir->CreateTrunc(m_ir->CreateLShr(m_ir->CreateLoad(spu_ptr<u64>(&spu_thread::ch_events), true), 32), get_type<u32>());
+		const auto res = call("spu_get_events", &exec_get_events, m_thread, mask);
 		const auto target = add_block_indirect(op, addr);
 		m_ir->CreateCondBr(m_ir->CreateICmpNE(res, m_ir->getInt32(0)), target, add_block_next());
 	}

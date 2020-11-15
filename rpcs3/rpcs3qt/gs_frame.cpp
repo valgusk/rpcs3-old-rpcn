@@ -5,12 +5,15 @@
 #include "Utilities/Timer.h"
 #include "Utilities/date_time.h"
 #include "Emu/System.h"
+#include "Emu/system_config.h"
+#include "Emu/IdManager.h"
 #include "Emu/Cell/Modules/cellScreenshot.h"
 
 #include <QCoreApplication>
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <string>
+#include <thread>
 
 #include "png.h"
 
@@ -38,6 +41,8 @@
 
 LOG_CHANNEL(screenshot);
 
+extern std::atomic<bool> g_user_asked_for_frame_capture;
+
 constexpr auto qstr = QString::fromStdString;
 
 gs_frame::gs_frame(const QRect& geometry, const QIcon& appIcon, const std::shared_ptr<gui_settings>& gui_settings)
@@ -46,6 +51,8 @@ gs_frame::gs_frame(const QRect& geometry, const QIcon& appIcon, const std::share
 	m_disable_mouse = gui_settings->GetValue(gui::gs_disableMouse).toBool();
 	m_disable_kb_hotkeys = gui_settings->GetValue(gui::gs_disableKbHotkeys).toBool();
 	m_show_mouse_in_fullscreen = gui_settings->GetValue(gui::gs_showMouseFs).toBool();
+	m_hide_mouse_after_idletime = gui_settings->GetValue(gui::gs_hideMouseIdle).toBool();
+	m_hide_mouse_idletime = gui_settings->GetValue(gui::gs_hideMouseIdleTime).toUInt();
 
 	m_window_title = qstr(Emu.GetFormattedTitle(0));
 
@@ -68,7 +75,20 @@ gs_frame::gs_frame(const QRect& geometry, const QIcon& appIcon, const std::share
 	create();
 
 	// Change cursor when in fullscreen.
-	connect(this, &QWindow::visibilityChanged, this, &gs_frame::HandleCursor);
+	connect(this, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility)
+	{
+		handle_cursor(visibility, true, true);
+	});
+
+	// Change cursor when this window gets or loses focus.
+	connect(this, &QWindow::activeChanged, this, [this]()
+	{
+		handle_cursor(visibility(), false, true);
+	});
+
+	// Configure the mouse hide on idle timer
+	connect(&m_mousehide_timer, &QTimer::timeout, this, &gs_frame::MouseHideTimeout);
+	m_mousehide_timer.setSingleShot(true);
 
 #ifdef _WIN32
 	m_tb_button = new QWinTaskbarButton();
@@ -129,6 +149,11 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 			screenshot.success("Made forced mark %d in log", ++count);
 			return;
 		}
+		else if (keyEvent->modifiers() == Qt::ControlModifier)
+		{
+			toggle_mouselock();
+			return;
+		}
 		break;
 	case Qt::Key_Return:
 		if (keyEvent->modifiers() == Qt::AltModifier)
@@ -180,6 +205,13 @@ void gs_frame::keyPressEvent(QKeyEvent *keyEvent)
 			}
 		}
 		break;
+	case Qt::Key_C:
+		if (keyEvent->modifiers() == Qt::AltModifier && !m_disable_kb_hotkeys)
+		{
+			g_user_asked_for_frame_capture = true;
+			return;
+		}
+		break;
 	case Qt::Key_F12:
 		screenshot_toggle = true;
 		break;
@@ -201,6 +233,54 @@ void gs_frame::toggle_fullscreen()
 			setVisibility(FullScreen);
 		}
 	});
+}
+
+void gs_frame::toggle_mouselock()
+{
+	// first we toggle the value
+	m_mouse_hide_and_lock = !m_mouse_hide_and_lock;
+
+	// and update the cursor
+	handle_cursor(visibility(), false, true);
+}
+
+void gs_frame::update_cursor()
+{
+	bool show_mouse;
+
+	if (!isActive())
+	{
+		// Show the mouse by default if this is not the active window
+		show_mouse = true;
+	}
+	else if (m_hide_mouse_after_idletime && !m_mousehide_timer.isActive())
+	{
+		// Hide the mouse if the idle timeout was reached (which means that the timer isn't running)
+		show_mouse = false;
+	}
+	else if (visibility() == QWindow::Visibility::FullScreen)
+	{
+		// Fullscreen: Show or hide the mouse depending on the settings.
+		show_mouse = m_show_mouse_in_fullscreen;
+	}
+	else
+	{
+		// Windowed: Hide the mouse if it was locked by the user
+		show_mouse = !m_mouse_hide_and_lock;
+	}
+
+	// Update Cursor if necessary
+	if (show_mouse != m_show_mouse.exchange(show_mouse))
+	{
+		setCursor(m_show_mouse ? Qt::ArrowCursor : Qt::BlankCursor);
+	}
+}
+
+bool gs_frame::get_mouse_lock_state()
+{
+	handle_cursor(visibility(), false, true);
+
+	return isActive() && m_mouse_hide_and_lock;
 }
 
 void gs_frame::close()
@@ -335,10 +415,10 @@ void gs_frame::flip(draw_context_t, bool /*skip_frame*/)
 	}
 }
 
-void gs_frame::take_screenshot(const std::vector<u8> sshot_data, const u32 sshot_width, const u32 sshot_height)
+void gs_frame::take_screenshot(const std::vector<u8> sshot_data, const u32 sshot_width, const u32 sshot_height, bool is_bgra)
 {
 	std::thread(
-		[sshot_width, sshot_height](const std::vector<u8> sshot_data)
+		[sshot_width, sshot_height, is_bgra](const std::vector<u8> sshot_data)
 		{
 			std::string screen_path = fs::get_config_dir() + "screenshots/";
 
@@ -361,9 +441,19 @@ void gs_frame::take_screenshot(const std::vector<u8> sshot_data, const u32 sshot
 			const u32* sshot_ptr = reinterpret_cast<const u32*>(sshot_data.data());
 			u32* alpha_ptr       = reinterpret_cast<u32*>(sshot_data_alpha.data());
 
-			for (size_t index = 0; index < sshot_data.size() / sizeof(u32); index++)
+			if (is_bgra) [[likely]]
 			{
-				alpha_ptr[index] = ((sshot_ptr[index] & 0xFF) << 16) | (sshot_ptr[index] & 0xFF00) | ((sshot_ptr[index] & 0xFF0000) >> 16) | 0xFF000000;
+				for (size_t index = 0; index < sshot_data.size() / sizeof(u32); index++)
+				{
+					alpha_ptr[index] = ((sshot_ptr[index] & 0xFF) << 16) | (sshot_ptr[index] & 0xFF00) | ((sshot_ptr[index] & 0xFF0000) >> 16) | 0xFF000000;
+				}
+			}
+			else
+			{
+				for (size_t index = 0; index < sshot_data.size() / sizeof(u32); index++)
+				{
+					alpha_ptr[index] = sshot_ptr[index] | 0xFF000000;
+				}
 			}
 
 			std::vector<u8> encoded_png;
@@ -447,15 +537,35 @@ void gs_frame::mouseDoubleClickEvent(QMouseEvent* ev)
 	}
 }
 
-void gs_frame::HandleCursor(QWindow::Visibility visibility)
+void gs_frame::handle_cursor(QWindow::Visibility visibility, bool from_event, bool start_idle_timer)
 {
-	if (visibility == QWindow::Visibility::FullScreen && !m_show_mouse_in_fullscreen)
+	// Update the mouse lock state if the visibility changed.
+	if (from_event)
 	{
-		setCursor(Qt::BlankCursor);
+		// In fullscreen we default to hiding and locking. In windowed mode we do not want the lock by default.
+		m_mouse_hide_and_lock = visibility == QWindow::Visibility::FullScreen;
+	}
+
+	// Update the mouse hide timer
+	if (m_hide_mouse_after_idletime && start_idle_timer)
+	{
+		m_mousehide_timer.start(m_hide_mouse_idletime);
 	}
 	else
 	{
-		setCursor(Qt::ArrowCursor);
+		m_mousehide_timer.stop();
+	}
+
+	// Update the cursor visibility
+	update_cursor();
+}
+
+void gs_frame::MouseHideTimeout()
+{
+	// Our idle timeout occured, so we update the cursor
+	if (m_hide_mouse_after_idletime && m_show_mouse)
+	{
+		handle_cursor(visibility(), false, false);
 	}
 }
 
@@ -491,6 +601,11 @@ bool gs_frame::event(QEvent* ev)
 			}
 		}
 		close();
+	}
+	else if (ev->type() == QEvent::MouseMove && (!m_show_mouse || m_mousehide_timer.isActive()))
+	{
+		// This will make the cursor visible again if it was hidden by the mouse idle timeout
+		handle_cursor(visibility(), false, true);
 	}
 	return QWindow::event(ev);
 }

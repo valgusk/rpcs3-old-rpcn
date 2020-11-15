@@ -1,12 +1,17 @@
 ﻿add_library(rpcs3_emu
 	IdManager.cpp
+	localized_string.cpp
 	System.cpp
 	system_config.cpp
 	system_config_types.cpp
 	VFS.cpp
 	GDB.cpp
 	title.cpp
+	perf_meter.cpp
 )
+
+# prevent WolfSSL from warning about not having harden options
+add_compile_definitions(WC_NO_HARDEN)
 
 target_link_libraries(rpcs3_emu
 	PRIVATE
@@ -34,11 +39,12 @@ target_sources(rpcs3_emu PRIVATE
 	../util/logs.cpp
 	../util/yaml.cpp
 	../util/cereal.cpp
+	../util/vm_native.cpp
+	../util/dyn_lib.cpp
 	../../Utilities/bin_patch.cpp
 	../../Utilities/cheat_info.cpp
 	../../Utilities/cond.cpp
 	../../Utilities/Config.cpp
-	../../Utilities/dynamic_library.cpp
 	../../Utilities/File.cpp
 	../../Utilities/JIT.cpp
 	../../Utilities/LUrlParser.cpp
@@ -49,7 +55,6 @@ target_sources(rpcs3_emu PRIVATE
 	../../Utilities/sysinfo.cpp
 	../../Utilities/Thread.cpp
 	../../Utilities/version.cpp
-	../../Utilities/VirtualMemory.cpp
 )
 
 target_include_directories(rpcs3_emu PUBLIC "${CMAKE_SOURCE_DIR}")
@@ -334,10 +339,6 @@ target_link_libraries(rpcs3_emu
 	PRIVATE
 		3rdparty::stblib 3rdparty::libpng)
 
-if(CMAKE_COMPILER_IS_GNUCXX)
-	target_link_libraries(rpcs3_emu PUBLIC -latomic)
-endif()
-
 
 # CPU
 target_sources(rpcs3_emu PRIVATE
@@ -351,6 +352,7 @@ target_link_libraries(rpcs3_emu
 
 # Io
 target_sources(rpcs3_emu PRIVATE
+	Io/interception.cpp
 	Io/KeyboardHandler.cpp
 	Io/pad_config.cpp
 	Io/pad_config_types.cpp
@@ -440,6 +442,7 @@ if(TARGET 3rdparty_vulkan)
 		RSX/VK/VKMemAlloc.cpp
 		RSX/VK/VKPresent.cpp
 		RSX/VK/VKProgramPipeline.cpp
+		RSX/VK/VKQueryPool.cpp
 		RSX/VK/VKRenderPass.cpp
 		RSX/VK/VKResolveHelper.cpp
 		RSX/VK/VKResourceManager.cpp
@@ -455,7 +458,7 @@ target_link_libraries(rpcs3_emu
 		3rdparty::ffmpeg 3rdparty::cereal
 		3rdparty::opengl 3rdparty::stblib
 		3rdparty::vulkan 3rdparty::glew
-		3rdparty::libusb
+		3rdparty::libusb 3rdparty::wolfssl
 	PRIVATE
 		3rdparty::span 3rdparty::xxhash
 )
