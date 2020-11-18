@@ -29,6 +29,7 @@
 *.res
 *.dump
 *.wav
+llvmlibs*
 
 /.cache
 /.cache2

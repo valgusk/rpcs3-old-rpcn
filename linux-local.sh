@@ -23,21 +23,24 @@ export QMAKE=$QT_BASE_DIR/bin/qmake
 
 
 if [ "$DOBUILD" = "true" ]; then
+    if [ "$DESTRUCTIVE" = "true" ]; then
+        # Pull all the submodules except llvm, since it is built separately and we just download that build
+        # Note: Tried to use git submodule status, but it takes over 20 seconds
+        # shellcheck disable=SC2046
+        git submodule -q update --init $(awk '/path/ && !/llvm/ { print $3 }' .gitmodules)
+        
+        # Download pre-compiled llvm libs
+        rm -rf llvmlibs
+        mv llvmlibs-linux.tar.gz "llvmlibs-linux.tar.gz.$(stat -c '%w' llvmlibs-linux.tar.gz)" || echo "no llvmlibs"
+        curl -sLO https://github.com/RPCS3/llvm-mirror/releases/download/custom-build/llvmlibs-linux.tar.gz
+        mkdir llvmlibs
+        tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
 
-    # Pull all the submodules except llvm, since it is built separately and we just download that build
-    # Note: Tried to use git submodule status, but it takes over 20 seconds
-    # shellcheck disable=SC2046
-    git submodule -q update --init $(awk '/path/ { print $3 }' .gitmodules)
+        mv build "build$(stat -c '%w' build)" || echo "no build"
+        # rm -rf build
+        mkdir build
+    fi
 
-    # Download pre-compiled llvm libs
-    # rm -rf llvmlibs
-    # curl -sLO https://github.com/RPCS3/llvm-mirror/releases/download/custom-build/llvmlibs-linux.tar.gz
-    # mkdir llvmlibs
-    # tar -xzf ./llvmlibs-linux.tar.gz -C llvmlibs
-
-    # # mv build "build$(stat -c '%w' build)" || echo "no build"
-    # rm -rf build
-    # mkdir build
     cd build || exit 1
 
     if [ "$COMPILER" = "gcc" ]; then
@@ -59,18 +62,20 @@ if [ "$DOBUILD" = "true" ]; then
 
     export CFLAGS="$CFLAGS -Ofast -fuse-ld=${LINKER}"
 
-    # cmake ..                                               \
-    #     -DCMAKE_INSTALL_PREFIX=/usr                        \
-    #     -DUSE_NATIVE_INSTRUCTIONS=ON                      \
-    #     -DUSE_PRECOMPILED_HEADERS=OFF                      \
-    #     -DBUILD_LLVM_SUBMODULE=ON                          \
-    #     -DCMAKE_C_FLAGS="$CFLAGS"                          \
-    #     -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
-    #     -DCMAKE_AR="$AR"                                   \
-    #     -DCMAKE_RANLIB="$RANLIB"                           \
-    #     -G Ninja
+    if [ "$DESTRUCTIVE" = "true" ]; then
+        cmake ..                                               \
+            -DCMAKE_INSTALL_PREFIX=/usr                        \
+            -DUSE_NATIVE_INSTRUCTIONS=ON                      \
+            -DUSE_PRECOMPILED_HEADERS=OFF                      \
+            -DBUILD_LLVM_SUBMODULE=OFF                          \
+            -DLLVM_DIR=llvmlibs/lib/cmake/llvm/                \
+            -DCMAKE_C_FLAGS="$CFLAGS"                          \
+            -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
+            -DCMAKE_AR="$AR"                                   \
+            -DCMAKE_RANLIB="$RANLIB"                           \
+            -G Ninja
+    fi
 
-    # -DCMAKE_PREFIX_PATH=/usr/                        
     ninja; build_status=$?;
 
     cd ..
