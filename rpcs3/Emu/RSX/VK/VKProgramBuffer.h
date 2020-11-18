@@ -80,6 +80,7 @@ struct VKTraits
 	using pipeline_properties = vk::pipeline_props;
 
 	static
+	// POI
 	void recompile_fragment_program(const RSXFragmentProgram &RSXFP, fragment_program_type& fragmentProgramData, size_t ID)
 	{
 		fragmentProgramData.Decompile(RSXFP);
@@ -91,6 +92,7 @@ struct VKTraits
 	void recompile_vertex_program(const RSXVertexProgram &RSXVP, vertex_program_type& vertexProgramData, size_t ID)
 	{
 		vertexProgramData.Decompile(RSXVP);
+		// POI
 		vertexProgramData.id = static_cast<u32>(ID);
 		vertexProgramData.Compile();
 	}

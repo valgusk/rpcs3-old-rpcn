@@ -400,6 +400,7 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	decompiler.Task();
 
 	shader.create(::glsl::program_domain::glsl_fragment_program, source);
+	// POI
 
 	for (const ParamType& PT : decompiler.m_parr.params[PF_PARAM_UNIFORM])
 	{
@@ -417,6 +418,7 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	}
 }
 
+// POI
 void VKFragmentProgram::Compile()
 {
 	if (g_cfg.video.log_programs)
