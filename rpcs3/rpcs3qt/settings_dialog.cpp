@@ -1779,6 +1779,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->logProg, emu_settings_type::LogShaderPrograms);
 	SubscribeTooltip(ui->logProg, tooltips.settings.log_shader_programs);
 
+	m_emu_settings->EnhanceCheckBox(ui->replaceProg, emu_settings_type::ReplaceShaderPrograms);
+	SubscribeTooltip(ui->replaceProg, tooltips.settings.replace_shader_programs);
+
 	m_emu_settings->EnhanceCheckBox(ui->disableHwOcclusionQueries, emu_settings_type::DisableOcclusionQueries);
 	SubscribeTooltip(ui->disableHwOcclusionQueries, tooltips.settings.disable_occlusion_queries);
 

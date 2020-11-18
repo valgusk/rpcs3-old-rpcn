@@ -3501,6 +3501,13 @@
               </property>
              </widget>
             </item>
+            <item>
+             <widget class="QCheckBox" name="replaceProg">
+              <property name="text">
+               <string>Replace Shader Programs</string>
+              </property>
+             </widget>
+            </item>
             <item alignment="Qt::AlignTop">
              <widget class="QCheckBox" name="forceHighpZ">
               <property name="text">

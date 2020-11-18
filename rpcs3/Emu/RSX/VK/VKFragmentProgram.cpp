@@ -399,6 +399,23 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	decompiler.device_props.emulate_depth_compare = !pdev->get_formats_support().d24_unorm_s8;
 	decompiler.Task();
 
+	std::hash<std::string> hasher;
+	size_t hashed = hasher(source);
+	std::string file_path = fs::get_cache_dir() + "shaderlog/FS" + std::to_string(hashed) + ".frag.spirv";
+
+	if (g_cfg.video.replace_programs) {
+		if(fs::is_file(file_path)) {
+			std::string source2;
+
+			fs::file to_read = fs::file(file_path, fs::read);
+			to_read.read(source2, to_read.size());
+
+			source = source2;
+		} else if (g_cfg.video.log_programs) {
+			fs::file(file_path, fs::rewrite).write(source);
+		}
+	}
+
 	shader.create(::glsl::program_domain::glsl_fragment_program, source);
 	// POI
 
@@ -421,8 +438,8 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 // POI
 void VKFragmentProgram::Compile()
 {
-	if (g_cfg.video.log_programs)
-		fs::file(fs::get_cache_dir() + "shaderlog/FragmentProgram" + std::to_string(id) + ".spirv", fs::rewrite).write(shader.get_source());
+	// if (g_cfg.video.log_programs)
+	// 	fs::file(fs::get_cache_dir() + "shaderlog/FragmentProgram" + std::to_string(id) + ".spirv", fs::rewrite).write(shader.get_source());
 	handle = shader.compile();
 }
 
