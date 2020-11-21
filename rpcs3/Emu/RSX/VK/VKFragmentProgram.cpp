@@ -384,6 +384,18 @@ VKFragmentProgram::~VKFragmentProgram()
 	Delete();
 }
 
+long long VKFragmentProgram::GetHash(const std::string &s) {
+  const int p = 31;
+  const int m = 1e9 + 9;
+  long long hash_value = 0;
+  long long p_pow = 1;
+  for (char const &c: s) {
+    hash_value = (hash_value + (c - 'a' + 1) * p_pow) % m;
+    p_pow = (p_pow * p) % m;
+  }
+  return hash_value;
+}
+
 void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 {
 	u32 size;
@@ -401,7 +413,9 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 	std::hash<std::string> hasher;
 	size_t hashed = hasher(source);
-	std::string file_path = fs::get_cache_dir() + "shaderlog/FS" + std::to_string(hashed) + ".frag.spirv";
+	long long hashed2 = GetHash(source);
+
+	std::string file_path = fs::get_cache_dir() + "shaderlog/FSh" + std::to_string(hashed2) + ".frag.spirv";
 
 	if (g_cfg.video.replace_programs) {
 		if(fs::is_file(file_path)) {
@@ -409,8 +423,10 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 			fs::file to_read = fs::file(file_path, fs::read);
 			to_read.read(source2, to_read.size());
-
 			source = source2;
+
+			// std::string file_path2 = fs::get_cache_dir() + "shaderlog/FSh" + std::to_string(hashed2) + ".frag.spirv";
+			// fs::file(file_path2, fs::rewrite).write(source);
 		} else if (g_cfg.video.log_programs) {
 			fs::file(file_path, fs::rewrite).write(source);
 		}

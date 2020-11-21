@@ -75,6 +75,7 @@ public:
 
 	/** Compile the decompiled fragment shader into a format we can use with OpenGL. */
 	void Compile();
+	long long GetHash(const std::string &s);
 
 private:
 	/** Deletes the shader and any stored information */
